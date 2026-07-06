@@ -1,0 +1,13 @@
+# python
+backend/.venv/
+backend/shortlist.db
+__pycache__/
+*.pyc
+.env
+
+# node
+frontend/node_modules/
+frontend/dist/
+
+# generated demo data
+data/synthetic/
