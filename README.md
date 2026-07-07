@@ -1,0 +1,50 @@
+# Shortlist — AI Hiring Assistant (POC)
+
+From "I need to hire someone" to a ranked, identity-blind shortlist with
+interview kits — with fairness and legal guardrails at every step.
+See `PRD.md` for requirements and `docs/` for the design spec and plans.
+
+**Status: Phase 1** — core agent workflow end-to-end. Guardrails (discrimination
+linter, layered redaction, unlawful-question filter, bias harness) are stub
+slots, clearly labelled in the UI; they become real in Phase 2.
+
+## Run it
+
+Prereqs: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node 20+, an Anthropic API key.
+
+```bash
+# backend
+cd backend
+uv sync
+set ANTHROPIC_API_KEY=sk-ant-...   # PowerShell: $env:ANTHROPIC_API_KEY="sk-ant-..."
+uv run uvicorn shortlist.app.main:app --port 8000
+
+# frontend (second terminal)
+cd frontend
+npm install
+npm run dev                         # http://localhost:5173
+```
+
+Demo flow: **New job** → describe the role in plain language → answer up to 5
+intake questions → review the generated JD + scoring rubric → **Seed 50 + screen**
+(synthetic resumes; a 50-resume run costs cents thanks to Haiku parsing +
+prompt-cached scoring) → review the ranked, identity-blind shortlist →
+shortlist/hold/reject with notes (every click audited) → generate interview kits.
+
+## Tests
+
+```bash
+cd backend
+uv run pytest -v      # no network needed - the Anthropic client is faked
+```
+
+## Architecture (short version)
+
+Code-orchestrated pipeline — the model never controls flow:
+
+    intake → JD+rubric → lint* → parse → redact* → score (per criterion)
+          → human review gate → kit → question filter*
+
+`*` = guardrail slots (stubs in Phase 1, real in Phase 2). Every model call is
+audit-logged with model + prompt version. Scoring runs on the redacted resume
+only; identity is revealed only at the human-review stage.
