@@ -95,6 +95,9 @@ def _screen_task(job_id: int) -> None:
 @router.post("/{job_id}/screen")
 def screen(job_id: int, background: BackgroundTasks, db: Session = Depends(get_session)):
     job = _get_job(db, job_id)
+    rubric = db.scalars(select(Rubric).where(Rubric.job_id == job_id)).first()
+    if rubric is None:
+        raise HTTPException(409, "job is not ready to screen - complete intake first")
     job.status = "screening"
     db.commit()
     background.add_task(_screen_task, job_id)

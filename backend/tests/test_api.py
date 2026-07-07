@@ -68,3 +68,21 @@ def test_full_journey(api_client, fake_llm, tmp_path, monkeypatch):
     detail = api_client.get(f"/api/applications/{app_id}").json()
     assert detail["raw_text"] and detail["redacted_text"]
     assert detail["decisions"][0]["action"] == "shortlist"
+
+
+def test_screen_and_kit_require_rubric(api_client, fake_llm, tmp_path, monkeypatch):
+    from shortlist.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+
+    # job stuck in intake - model asked a question, no JD/rubric generated yet
+    fake_llm.queue.append(IntakeDecision(action="ask", question="What hours?", brief=RoleBrief()))
+    r = api_client.post("/api/jobs", json={"description": "barista"})
+    job_id = r.json()["job_id"]
+
+    r = api_client.post(f"/api/jobs/{job_id}/screen")
+    assert r.status_code == 409
+
+    api_client.post(f"/api/jobs/{job_id}/seed", json={"count": 1})
+    app_id = api_client.get(f"/api/jobs/{job_id}/applications").json()[0]["id"]
+    r = api_client.post(f"/api/applications/{app_id}/kit")
+    assert r.status_code == 409

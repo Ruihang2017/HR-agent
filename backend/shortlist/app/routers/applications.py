@@ -77,6 +77,8 @@ def create_kit(application_id: int, db: Session = Depends(get_session)):
     a = _get_application(db, application_id)
     job = db.get(Job, a.job_id)
     rubric = db.scalars(select(Rubric).where(Rubric.job_id == a.job_id)).first()
+    if rubric is None:
+        raise HTTPException(409, "job has no rubric yet - complete intake first")
     criteria = [Criterion(**c) for c in rubric.criteria]
     kit, verdicts = generate_kit(db, a, job, criteria)
     return {

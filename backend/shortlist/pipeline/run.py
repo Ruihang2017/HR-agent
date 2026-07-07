@@ -14,6 +14,8 @@ def screen_job(db: Session, job_id: int) -> None:
     aborts the run - it flags that candidate for manual review (honesty-in-failure)."""
     job = db.get(Job, job_id)
     rubric = db.scalars(select(Rubric).where(Rubric.job_id == job_id)).first()
+    if rubric is None:
+        raise ValueError(f"screen_job called for job {job_id} with no rubric")
     criteria = [Criterion(**c) for c in rubric.criteria]
     job.status = "screening"
     db.commit()
