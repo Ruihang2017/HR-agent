@@ -33,7 +33,7 @@ def score_application(
             output_model=CriterionEval,
             job_id=application.job_id,
             application_id=application.id,
-            cache_system=True,  # stable prefix cached across the whole screening run
+            cache_system=True,  # cache breakpoint on the system prompt; inert until Phase 2 (see llm/client.py)
         )
         results.append(
             CriterionResult(
