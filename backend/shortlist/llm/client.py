@@ -40,7 +40,10 @@ def call_structured(
     model = STAGE_MODELS[stage]
     system_block: dict = {"type": "text", "text": prompt.system}
     if cache_system:
-        # stable prefix (system + rubric baked into it) -> cache hits across a scoring run
+        # Marks the static system prompt as a cache breakpoint. NOTE: on current
+        # Opus-tier models prefixes under 4096 tokens don't cache, so this is a
+        # no-op until Phase 2 restructures the scoring prefix (rubric/resume into
+        # the cached span) and verifies via usage.cache_read_input_tokens.
         system_block["cache_control"] = {"type": "ephemeral"}
     user_text = prompt.user_template.format(**variables)
 

@@ -76,7 +76,10 @@ def record_decision(application_id: int, body: DecisionRequest,
 def create_kit(application_id: int, db: Session = Depends(get_session)):
     a = _get_application(db, application_id)
     job = db.get(Job, a.job_id)
-    rubric = db.scalars(select(Rubric).where(Rubric.job_id == a.job_id)).first()
+    rubric = db.scalars(
+        select(Rubric).where(Rubric.job_id == a.job_id)
+        .order_by(Rubric.version.desc(), Rubric.id.desc())
+    ).first()
     if rubric is None:
         raise HTTPException(409, "job has no rubric yet - complete intake first")
     criteria = [Criterion(**c) for c in rubric.criteria]

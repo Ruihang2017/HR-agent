@@ -86,3 +86,17 @@ def test_screen_and_kit_require_rubric(api_client, fake_llm, tmp_path, monkeypat
     app_id = api_client.get(f"/api/jobs/{job_id}/applications").json()[0]["id"]
     r = api_client.post(f"/api/applications/{app_id}/kit")
     assert r.status_code == 409
+
+
+def test_intake_rejected_after_finalize(api_client, fake_llm, tmp_path, monkeypatch):
+    from shortlist.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+
+    fake_llm.queue.append(IntakeDecision(action="finalize", brief=RoleBrief(title="Barista")))
+    fake_llm.queue.append(JD)
+    r = api_client.post("/api/jobs", json={"description": "barista"})
+    job_id = r.json()["job_id"]
+    assert r.json()["decision"]["action"] == "finalize"
+
+    r = api_client.post(f"/api/jobs/{job_id}/intake", json={"answer": "one more thing"})
+    assert r.status_code == 409

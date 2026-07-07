@@ -47,6 +47,8 @@ def create_job(body: CreateJobRequest, db: Session = Depends(get_session)):
 @router.post("/{job_id}/intake")
 def answer_intake(job_id: int, body: IntakeAnswerRequest, db: Session = Depends(get_session)):
     job = _get_job(db, job_id)
+    if job.status != "intake":
+        raise HTTPException(409, "intake is already finalized for this job")
     decision = intake_step(db, job, answer=body.answer)
     if decision.action == "finalize":
         generate_jd(db, job, decision.brief)
@@ -62,7 +64,10 @@ def list_jobs(db: Session = Depends(get_session)):
 @router.get("/{job_id}")
 def get_job(job_id: int, db: Session = Depends(get_session)):
     job = _get_job(db, job_id)
-    rubric = db.scalars(select(Rubric).where(Rubric.job_id == job_id)).first()
+    rubric = db.scalars(
+        select(Rubric).where(Rubric.job_id == job_id)
+        .order_by(Rubric.version.desc(), Rubric.id.desc())
+    ).first()
     return {
         "id": job.id,
         "title": job.title,
@@ -95,7 +100,10 @@ def _screen_task(job_id: int) -> None:
 @router.post("/{job_id}/screen")
 def screen(job_id: int, background: BackgroundTasks, db: Session = Depends(get_session)):
     job = _get_job(db, job_id)
-    rubric = db.scalars(select(Rubric).where(Rubric.job_id == job_id)).first()
+    rubric = db.scalars(
+        select(Rubric).where(Rubric.job_id == job_id)
+        .order_by(Rubric.version.desc(), Rubric.id.desc())
+    ).first()
     if rubric is None:
         raise HTTPException(409, "job is not ready to screen - complete intake first")
     job.status = "screening"

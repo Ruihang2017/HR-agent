@@ -27,8 +27,8 @@ npm run dev                         # http://localhost:5173
 
 Demo flow: **New job** → describe the role in plain language → answer up to 5
 intake questions → review the generated JD + scoring rubric → **Seed 50 + screen**
-(synthetic resumes; a 50-resume run costs cents thanks to Haiku parsing +
-prompt-cached scoring) → review the ranked, identity-blind shortlist →
+(synthetic resumes; parsing runs on Haiku to keep costs down — prompt-cache
+savings on scoring land in Phase 2) → review the ranked, identity-blind shortlist →
 shortlist/hold/reject with notes (every click audited) → generate interview kits.
 
 ## Tests

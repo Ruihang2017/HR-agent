@@ -29,3 +29,5 @@ def test_generate_jd_stores_jd_rubric_and_lint(db, fake_llm):
     rubric = db.query(Rubric).filter_by(job_id=job.id).one()
     assert len(rubric.criteria) == 2
     assert rubric.criteria[0]["type"] == "must_have"
+    assert job.title == "Part-time Barista"
+    assert rubric.version == 1

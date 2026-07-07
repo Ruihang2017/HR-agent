@@ -32,6 +32,11 @@ class FakeMessages:
     def parse(self, **kwargs):
         self._owner.calls.append(kwargs)
         item = self._owner.queue.pop(0)
+        if not isinstance(item, Exception):
+            expected = kwargs.get("output_format")
+            assert expected is not None and isinstance(item, expected), (
+                f"fake_llm queue drift: got {type(item).__name__}, call wanted {expected.__name__}"
+            )
         if isinstance(item, Exception):
             raise item
         return FakeResponse(item)
