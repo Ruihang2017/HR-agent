@@ -69,8 +69,8 @@ def seed_applications(db: Session, job_id: int, resume_dir: Path) -> int:
     count = 0
     for path in sorted(resume_dir.glob("resume_*")):
         result = extract_text(path)
-        if result.text:
-            lines = [ln for ln in result.text.strip().splitlines() if ln.strip()]
+        lines = [ln for ln in (result.text or "").strip().splitlines() if ln.strip()]
+        if lines:
             name, status = lines[0].strip(), "received"
         else:
             name, status = path.stem, "needs_manual_review"
