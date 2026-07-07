@@ -9,29 +9,43 @@ export default function NewJobPage() {
   const [decision, setDecision] = useState<IntakeDecision | null>(null);
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const start = async () => {
+    setError(null);
     setBusy(true);
-    const r = await api.createJob(description);
-    setJobId(r.job_id);
-    setDecision(r.decision);
-    setBusy(false);
-    if (r.decision.action === "finalize") nav(`/jobs/${r.job_id}`);
+    try {
+      const r = await api.createJob(description);
+      setJobId(r.job_id);
+      setDecision(r.decision);
+      if (r.decision.action === "finalize") nav(`/jobs/${r.job_id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Request failed");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const reply = async () => {
     if (jobId === null) return;
+    setError(null);
     setBusy(true);
-    const r = await api.answerIntake(jobId, answer);
-    setDecision(r.decision);
-    setAnswer("");
-    setBusy(false);
-    if (r.decision.action === "finalize") nav(`/jobs/${jobId}`);
+    try {
+      const r = await api.answerIntake(jobId, answer);
+      setDecision(r.decision);
+      setAnswer("");
+      if (r.decision.action === "finalize") nav(`/jobs/${jobId}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Request failed");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <div className="max-w-xl space-y-4">
       <h1 className="text-xl font-semibold">Describe the role</h1>
+      {error && <p className="rounded bg-red-50 p-2 text-sm text-red-800">{error}</p>}
       {jobId === null ? (
         <>
           <textarea

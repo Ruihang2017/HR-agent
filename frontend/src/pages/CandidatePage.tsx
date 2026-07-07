@@ -9,6 +9,7 @@ export default function CandidatePage() {
   const [note, setNote] = useState("");
   const [showOriginal, setShowOriginal] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => { api.getApplication(appId).then(setDetail); }, [appId]);
   useEffect(refresh, [refresh]);
@@ -16,16 +17,27 @@ export default function CandidatePage() {
   if (!detail) return <p>Loading…</p>;
 
   const decide = async (action: "shortlist" | "hold" | "reject") => {
-    await api.decide(appId, action, note || undefined);
-    setNote("");
-    refresh();
+    setError(null);
+    try {
+      await api.decide(appId, action, note || undefined);
+      setNote("");
+      refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Request failed");
+    }
   };
 
   const makeKit = async () => {
+    setError(null);
     setBusy(true);
-    await api.createKit(appId);
-    setBusy(false);
-    refresh();
+    try {
+      await api.createKit(appId);
+      refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Request failed");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -33,6 +45,7 @@ export default function CandidatePage() {
       <h1 className="text-xl font-semibold">{detail.candidate_name}
         <span className="ml-3 text-sm font-normal text-gray-500">{detail.status}</span>
       </h1>
+      {error && <p className="rounded bg-red-50 p-2 text-sm text-red-800">{error}</p>}
 
       {detail.report && (
         <div className="rounded border p-3">

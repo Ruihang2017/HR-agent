@@ -8,6 +8,7 @@ export default function JobDetailPage() {
   const [job, setJob] = useState<JobDetail | null>(null);
   const [apps, setApps] = useState<ApplicationRow[]>([]);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     api.getJob(jobId).then(setJob);
@@ -16,11 +17,17 @@ export default function JobDetailPage() {
   useEffect(refresh, [refresh]);
 
   const seedAndScreen = async () => {
+    setError(null);
     setBusy(true);
-    await api.seed(jobId, 50);
-    await api.screen(jobId);
-    setBusy(false);
-    refresh();
+    try {
+      await api.seed(jobId, 50);
+      await api.screen(jobId);
+      refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Request failed");
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (!job) return <p>Loading…</p>;
@@ -50,6 +57,8 @@ export default function JobDetailPage() {
           <button onClick={refresh} className="rounded border px-3 py-1">Refresh</button>
         </div>
       </div>
+
+      {error && <p className="rounded bg-red-50 p-2 text-sm text-red-800">{error}</p>}
 
       {job.lint_results && !job.lint_results.implemented && (
         <p className="rounded bg-amber-50 p-2 text-sm text-amber-800">
