@@ -49,3 +49,35 @@ def fake_llm(monkeypatch):
     fake = FakeClient()
     monkeypatch.setattr("shortlist.llm.client._get_client", lambda: fake)
     return fake
+
+
+@pytest.fixture()
+def api_client(monkeypatch):
+    from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    import shortlist.db as db_module
+    from shortlist.app.main import app
+    from shortlist.db import Base, get_session
+    from shortlist.models import tables  # noqa: F401
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    test_session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    # background tasks open their own session via shortlist.db.SessionLocal
+    monkeypatch.setattr(db_module, "SessionLocal", test_session_factory)
+
+    def override():
+        session = test_session_factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    app.dependency_overrides[get_session] = override
+    with TestClient(app) as client:
+        yield client
+    app.dependency_overrides.clear()
