@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Working name** | Jobpin (local hiring assistant) |
-| **Version** | 2.7 — Canonical |
-| **Date** | 9 July 2026 |
+| **Version** | 2.8 — Canonical |
+| **Date** | 10 July 2026 |
 | **Owner** | Horace Hou |
 | **Provenance** | Derived in full from the client technical spec (2026-07-09 meeting), preserved verbatim at `docs/meeting_minutes/2026-07-09-jobpin-technical-spec.md` (D-8). **This PRD is the single source of truth**; new client input arrives as new minutes and is applied here by explicit update. |
 | **Status** | Pre-implementation — the repository was reset on 2026-07-09; no product code exists yet |
@@ -21,6 +21,7 @@
 | 2.5 | 2026-07-09 | OS targets decided (D-14): cross-platform-safe Electron codebase, **Windows-only shipping for MVP**, macOS post-MVP on demand, Linux out of scope. |
 | 2.6 | 2026-07-09 | Scope close-out (D-15–D-19): Gmail integration and Jobpin-platform integration become **non-goals**; AU-first developer-supplied lawyer-reviewed templates homed at `templates/au/`; encryption scoped to candidate data only; onboarding-document generation moved to immediately-post-MVP. **No open questions remain.** |
 | 2.7 | 2026-07-09 | Cleanup (D-20): decision log moved to `DECISIONS.md`; Open-questions and Glossary sections removed (all questions resolved — resolutions recorded in `DECISIONS.md`); all section symbols replaced with plain "section N" references; DB key fields rendered as a code block. Sections renumbered: Implementation plan is now 10, Cross-cutting concerns is 11. |
+| 2.8 | 2026-07-10 | Phase 0 design inputs decided: `jobpin-data/` lives in the user's home folder with the DB inside it (D-21, OneDrive-safe); foundation stack = TypeScript + electron-vite + electron-builder (NSIS), Hono server in the Electron main process on an OS-assigned localhost port, better-sqlite3, SQL-file migrations (D-22). |
 
 ## How to use this document
 
@@ -234,6 +235,8 @@ Fields for the remaining tables (`interview_questions`, `interview_answers`, `ai
 
 ### 8.2 File layout *[spec 3]*
 
+`jobpin-data/` lives directly in the user's home folder (e.g. `C:\Users\<boss>\jobpin-data`) — visible for file-first transparency, yet outside OneDrive's default sync scope, which would otherwise silently upload candidate data (D-21). The SQLite database lives inside it (`jobpin-data/jobpin.db`), so **one folder is the complete data set** — the unit of backup and restore (F8.4).
+
 ```
 jobpin-data/
   company/
@@ -288,7 +291,7 @@ Distribution: a **local installer**. Runtime shape:
        token issuance (D-12)        (candidate content never transits it)
 ```
 
-MVP stack: Electron · React (D-3; spec allows React/Vue) · Node.js local server · SQLite · local file storage · **model gateway over cloud LLM APIs — OpenAI / DeepSeek / Anthropic Claude (D-9), subscription-based access (D-10)** · local STT (post-MVP) · Handlebars / Markdown→PDF/DOCX templating. *(The archived minutes' "local LLM runtime, Hermes modified build" was a minute-taking error — see D-9.)*
+MVP stack (concrete per D-22): Electron · React + TypeScript (D-3) · electron-vite (dev/build) + electron-builder (NSIS Windows installer, D-14) · **Hono** local server hosted in the Electron main process, bound to `127.0.0.1` on an OS-assigned port · SQLite via **better-sqlite3** with plain SQL-file migrations · local file storage at `~/jobpin-data` (D-21) · **model gateway over cloud LLM APIs — OpenAI / DeepSeek / Anthropic Claude (D-9), subscription-based access (D-10)** · local STT (post-MVP) · Handlebars / Markdown→PDF/DOCX templating. *(The archived minutes' "local LLM runtime, Hermes modified build" was a minute-taking error — see D-9.)*
 
 **No repository code exists yet** — the previous implementation (Python/FastAPI/React web app) was removed on 2026-07-09 and is unrelated to this architecture; see D-1.
 
@@ -299,11 +302,11 @@ Phases group the spec's recommended build order (tasks 1–14, *[spec 11]*), eac
 ### Phase 0 — Desktop foundation *(tasks 1–3)*
 
 - **Objective:** a launchable local skeleton — the Electron shell, the embedded Node server, and the persistence substrate — so every later feature has a home.
-- **Scope:** Electron app boot; local server on a localhost port; SQLite schema for all section 8.1 tables; `jobpin-data/` root + `company/` scaffold creation on first run. **Out:** any AI, any UI beyond a shell window.
-- **Technical approach:** Electron + React (D-3) + Node local server in one installer-able project; schema migration mechanism chosen here; port selection/collision policy; decide remaining table fields (section 8.1) within the spec's table list.
+- **Scope:** Electron app boot; local server on a localhost port; SQLite schema for all section 8.1 tables; `jobpin-data/` root (in the user's home folder, D-21) + `company/` scaffold creation on first run. **Out:** any AI, any UI beyond a shell window.
+- **Technical approach (locked by D-22):** single-package TypeScript project scaffolded with electron-vite (`src/main`, `src/preload`, `src/renderer`, `src/server`); **Hono** server hosted in the Electron main process, bound to `127.0.0.1:0` (OS-assigned port — no collision handling needed), port handed to the renderer via preload IPC; **better-sqlite3** with numbered SQL migrations tracked in a `migrations` table; **electron-builder** NSIS installer (D-14); single-instance lock. Remaining table fields (section 8.1) are specified in the Phase 0 design spec.
 - **Dependencies:** none.
 - **Acceptance criteria:** fresh install → app opens; server responds on localhost; DB file exists with all 13 tables; `jobpin-data/company/` scaffold (empty templates) created; everything works offline.
-- **Risks:** Windows-only packaging/signing per D-14, but keep the codebase cross-platform-safe (no Windows-only path or credential assumptions — use Electron's cross-platform APIs, e.g. `safeStorage`, for the D-12 tokens); installer tooling choice (e.g. electron-builder) is made here.
+- **Risks:** Windows-only packaging/signing per D-14, but keep the codebase cross-platform-safe (no Windows-only path or credential assumptions — use Electron's cross-platform APIs, e.g. `safeStorage`, for the D-12 tokens); better-sqlite3 native prebuilds must match the Electron ABI (electron-builder's rebuild step handles this — verify in the packaged app, not just dev).
 
 ### Phase 1 — Job workspace & candidate intake *(tasks 4–6)*
 

@@ -39,8 +39,42 @@ also have a dated entry below.
 | **D-18** | 2026-07-09 | **Jobpin-platform integration is a non-goal** — no plugin, import/export bridge, or sync layer; the minutes' future-integration note [spec 1] is descoped. Resolves OQ-8. | Owner decision; zero coupling keeps the product independent. |
 | **D-19** | 2026-07-09 | **Onboarding document generation (F6.2, spec task 13) is immediately post-MVP** — the first backlog item after MVP ships; PRD Phase 4 covers email templates only (spec task 12). Resolves OQ-9 in favour of the spec 9 MVP list. | Owner decision; matches the spec's MVP list exactly while keeping task 13 next in line. |
 | **D-20** | 2026-07-09 | **PRD v2.7 cleanup:** decision log consolidated into this file (this index is the canonical D-registry); PRD Open-questions and Glossary sections removed (all resolved); "§" symbols replaced with plain section references; PRD sections renumbered (Implementation plan → 10, Cross-cutting → 11); DB key fields rendered as a code block. | Owner directive — one home per kind of content; "§" was unreadable to the team; duplicated decision content in two files invites drift. |
+| **D-21** | 2026-07-10 | **`jobpin-data/` lives in the user's home folder** (e.g. `C:\Users\<boss>\jobpin-data`), with the SQLite DB inside it (`jobpin-data/jobpin.db`) — one folder is the complete data set. | Visible (file-first transparency) yet outside OneDrive's default sync scope — a Documents location would silently sync candidate PII to the cloud on many Windows 11 machines, breaking the local-only invariant; one folder makes backup/restore (F8.4) trivial. Rejected: Documents (OneDrive trap), AppData (hidden — kills transparency), first-run picker (unneeded UX for MVP). |
+| **D-22** | 2026-07-10 | **Phase 0 foundation stack (Approach A):** single-package TypeScript project; electron-vite (dev/build) + electron-builder (NSIS Windows installer); **Hono** HTTP server hosted in the Electron main process, bound to `127.0.0.1:0` (OS-assigned port, handed to the renderer via preload IPC); **better-sqlite3**; numbered SQL-file migrations tracked in a `migrations` table; single-instance lock. | Shortest path to Phase 0 acceptance with industry-standard parts and the best dev loop; nothing blocks later upgrades (utilityProcess isolation, an ORM) without rearchitecting. Rejected: Electron Forge all-in-one (rougher Vite integration, clunkier Squirrel installer); utilityProcess + Fastify + Drizzle now (more moving parts than the skeleton needs). |
 
 ---
+
+### 2026-07-10 — Phase 0: data location in the user's home folder (D-21)
+**Decision:** `jobpin-data/` is created directly in the user's home folder
+(`C:\Users\<boss>\jobpin-data`), with the SQLite database inside it (`jobpin-data/jobpin.db`).
+One folder is the complete data set — the unit of backup, restore, and (Phase 5) encryption.
+**Context:** Phase 0 design session. The obvious-looking choice (Documents) hides a trap: on many
+Windows 11 machines Documents is OneDrive-redirected, so candidate PII would silently sync to
+Microsoft's cloud — breaking PRD invariant 11.1-8 without anyone noticing.
+**Alternatives:** Documents (rejected — OneDrive trap); Electron `userData`/AppData (rejected —
+hidden, kills file-first transparency); first-run folder picker (rejected — adds first-run UX and
+move/migration edge cases the MVP doesn't need; a settings override can come later).
+**Rationale:** Home folder is visible, discoverable, OneDrive-safe by default, and trivially
+backupable.
+**Status:** Active. D-21 (index above); PRD section 8.2 updated.
+
+### 2026-07-10 — Phase 0 foundation stack: Approach A (D-22)
+**Decision:** Single-package **TypeScript** project scaffolded with **electron-vite**
+(`src/main`, `src/preload`, `src/renderer`, `src/server`); **electron-builder** producing an NSIS
+Windows installer (D-14); **Hono** HTTP server hosted in the Electron main process, bound to
+`127.0.0.1:0` — the OS assigns a free port, eliminating collision handling — with the port handed
+to the renderer via preload IPC; **better-sqlite3** (synchronous API suits a single-user local
+app) with numbered SQL-file migrations tracked in a `migrations` table; Electron single-instance
+lock.
+**Context:** Phase 0 design session; PRD section 10 Phase 0 deferred installer tooling, migration
+mechanism, and port policy to this design.
+**Alternatives:** Electron Forge all-in-one (rejected — its Vite plugin is rougher than
+electron-vite and Squirrel installers are clunkier than NSIS); utilityProcess-hosted server +
+Fastify + Drizzle ORM (rejected for now — crash isolation and typed schema are real benefits but
+more moving parts than a skeleton needs; both are adoptable later without rearchitecting).
+**Rationale:** Boring, industry-standard parts; best dev loop; shortest path to the Phase 0
+acceptance criteria ("fresh install → app opens", 13 tables, offline).
+**Status:** Active. D-22 (index above); PRD section 9 stack + Phase 0 brief updated.
 
 ### 2026-07-09 — PRD v2.7 cleanup: decision log consolidated here (D-20)
 **Decision:** The PRD's "Key decisions log" section moved into this file — the **decision index
