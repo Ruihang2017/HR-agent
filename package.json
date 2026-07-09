@@ -1,0 +1,40 @@
+{
+  "name": "jobpin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Jobpin - local-first hiring workbench (boss-only desktop app)",
+  "main": "./out/main/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "cross-env ELECTRON_RUN_AS_NODE=1 electron ./node_modules/vitest/vitest.mjs run",
+    "test:watch": "cross-env ELECTRON_RUN_AS_NODE=1 electron ./node_modules/vitest/vitest.mjs",
+    "postinstall": "electron-rebuild -f -w better-sqlite3",
+    "dist": "electron-vite build && electron-builder --win"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.8",
+    "better-sqlite3": "^12.11.1",
+    "hono": "^4.12.28"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
+    "cross-env": "^10.1.0",
+    "electron": "^41.7.1",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^3.1.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
