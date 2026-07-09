@@ -8,6 +8,16 @@ See `PRD.md` for requirements and `docs/` for the design spec and plans.
 linter, layered redaction, unlawful-question filter, bias harness) are stub
 slots, clearly labelled in the UI; they become real in Phase 2.
 
+## Project docs
+
+| Doc | What it holds |
+|---|---|
+| [`PRD.md`](PRD.md) | The source of truth: requirements, current state, architecture, decisions, phased plan |
+| [`DECISIONS.md`](DECISIONS.md) | Dated log of major decisions + rationale |
+| [`docs/handover/`](docs/handover/) | One handover per major implementation or phase |
+| [`docs/`](docs/) | Design spec and phase plans |
+| [`CLAUDE.md`](CLAUDE.md) | Working agreement for contributors (human or AI) |
+
 ## Run it
 
 Prereqs: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node 20+, an OpenAI API key.

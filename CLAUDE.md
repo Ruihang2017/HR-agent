@@ -1,50 +1,49 @@
-# Shortlist — AI Hiring Assistant POC
+# CLAUDE.md — Working agreement
 
-AI agent that takes an Australian small-business owner from "I need to hire someone" to a ranked, identity-blind shortlist plus interview kits — with fairness and legal guardrails at every step. Skills-practice / portfolio project heading toward a client demo and possible pilot.
+Process contract for anyone working in this repo, human or AI agent. This file holds
+**rules of engagement**, not project knowledge. The project's knowledge lives in the
+documents referenced below — start there.
 
-**Read first:** `PRD.md` (requirements, F-numbers referenced throughout) and `docs/superpowers/specs/2026-07-06-shortlist-poc-design.md` (approved design). The implementation plan lives in `docs/plans/`.
+## 1. `PRD.md` is the source of truth
+- `PRD.md` (repo root) defines what this product must do. **Read it before starting any
+  task.** Requirements written as invariants or hard constraints are binding — treat them
+  as non-negotiable, not as defaults you may trade away.
+- **Never modify `PRD.md` unless the user explicitly asks you to.** If a task reveals the
+  PRD is wrong, stale, or contradicted by the code, **stop and raise it** — describe the
+  conflict and propose the edit, then let the user decide. Don't self-edit the source of truth.
 
-## Build order (deliberate, differs from PRD milestones)
+## 2. Don't self-edit this file
+- **Never modify this `CLAUDE.md` unless the user explicitly asks you to.** Propose changes;
+  don't apply them unprompted.
 
-1. **Phase 1** — core agent workflow end-to-end, guardrails as stub slots
-2. **Phase 2** — real guardrails, harnessing, security (bias harness, RAG-grounded linter/filter, layered redaction, audit export, encryption)
-3. **Phase 3** — demo polish, pilot-readiness docs
+## 3. Keep `README.md` true — after every major task
+- `README.md` must always describe how to install, configure, run, and test the app **as it
+  currently is**. After any major task, update it as part of the same change. A task is not
+  "done" while the README still describes the old world.
 
-## Architecture
+## 4. Log major decisions in `DECISIONS.md`
+- `DECISIONS.md` (repo root) is the append-mostly record of every major decision and its
+  rationale, so a future developer can always trace *why*. After a major task that involved
+  a real choice, add a dated entry: **decision, context, alternatives considered, rationale,
+  status.** When a later decision overrides an earlier one, add a new entry that supersedes
+  it — don't silently rewrite history.
 
-Monorepo: `backend/` (Python 3.12+, FastAPI, SQLAlchemy + SQLite) and `frontend/` (Vite + React + TS + Tailwind).
+## 5. Write a handover per major implementation or phase
+- Every major implementation or phase produces **one independent handover file** in
+  `docs/handover/`. See `docs/handover/README.md` for the convention and template. It records
+  what was built, how it was verified, what's still open, and how to pick the work up —
+  written for someone who wasn't there.
 
-The AI layer is a **code-orchestrated pipeline**, not an agent loop. Code controls the stage sequence; the model never controls flow:
+## What counts as "major"
+A phase, a new subsystem, a dependency/provider migration, a data-model or public-API change,
+or anything that alters how the app is run, configured, or deployed. Small fixes and refactors
+skip the decision log and handover — but still keep the README honest.
 
-```
-intake (bounded Q&A, max 5) → jd_gen + rubric → lint → parse → redact
-  → score (one call per criterion) → human review UI → kit_gen → question_filter
-```
-
-- Each stage in `backend/pipeline/` is a typed function `(PydanticModel, ctx) -> PydanticModel` wrapping one focused OpenAI call.
-- Guardrail stages (`lint`, `redact`, `question_filter`) are **slots** in `backend/guardrails/` — Phase 1 ships stubs (regex-only redaction, pass-through linter/filter); Phase 2 swaps real implementations behind the same interfaces. Do not bypass or inline a slot.
-- Data model (PRD §8): `Job → Rubric → Application → ScoreReport → DecisionEvent`, plus `InterviewKit` and append-only `AuditEvent`.
-
-## LLM layer rules (backend/llm/)
-
-- All model calls go through the single `call_structured()` wrapper in `shortlist/llm/client.py` — it persists stage, model, prompt_version, redacted inputs, output, and token usage as an `AuditEvent`. Never call the OpenAI SDK directly from a pipeline stage. The API key is read from `backend/.env` (`OPENAI_API_KEY`).
-- **Structured outputs only:** `client.beta.chat.completions.parse()` with a Pydantic model passed as `response_format`; read the result from `response.choices[0].message.parsed`. No hand-parsing JSON from text. Validation errors: retry once, then flag "needs manual review".
-- **Model tiering** (per-stage in config): `gpt-4o-mini` for parsing/redaction assistance; `gpt-4o` for JD/rubric generation, scoring, kits, linter/filter reasoning. Model IDs are config-driven — override via `SHORTLIST_MODEL_FAST` / `SHORTLIST_MODEL_STRONG`.
-- **Scoring consistency (F3.4)** comes from per-criterion calls, strict schemas, and frozen versioned prompts (plus the golden-set regression test) — not sampling luck. We pass no `temperature`/`top_p`, which keeps the wrapper portable across model families (including reasoning models that reject them); a low temperature is available as a config lever for non-reasoning models if a run ever needs it.
-- Prompts live in the versioned prompt registry, not inline in stage code. Changing a prompt bumps its version; scoring-prompt changes must pass the golden-set regression.
-- Prompt caching: OpenAI caches long, stable prompt prefixes automatically (no `cache_control` needed). Keep the system prompt + rubric first and byte-identical across candidates of a job, and put per-candidate content after them, so those cache hits land.
-- Resume content is **untrusted input** (prompt-injection surface). Keep it delimited in prompts; never let it into system prompts.
-
-## Product invariants (never violate, any phase)
-
-- No candidate is ever rejected, ranked out, or advanced without an explicit human action. No bulk auto-actions. Must-have failures go to a "did not meet stated requirements" section — visible, never auto-rejected (F3.3, F4.2).
-- Every AI output and every human decision is logged to the append-only audit trail (F4.3).
-- Compliance outputs cite the grounding corpus or refuse and link to fairwork.gov.au — never improvise legal guidance (F6.1). Always carry the "general information, not legal advice" disclaimer.
-- Award pointers name the likely award only — never compute rates or classifications (PRD §3).
-- Parse/score failures surface as "needs manual review" — never a silent zero (NFR honesty-in-failure).
-
-## Conventions
-
-- Tests: pytest in `backend/tests/`. Each phase's definition-of-done is executable. The bias harness (matched-pair score parity) is the portfolio centrepiece — keep it and its report artifact green and committed.
-- Windows dev machine; prefer cross-platform tooling in scripts.
-- Synthetic data only until a pilot is agreed — no real candidate PII in the repo, fixtures, or tests.
+## Where things live
+| File / dir | Holds |
+|---|---|
+| `PRD.md` | Requirements — the source of truth |
+| `README.md` | How to install / configure / run / test, right now |
+| `DECISIONS.md` | Dated log of major decisions + rationale |
+| `docs/handover/` | One handover per major implementation or phase |
+| `docs/` | Design specs, plans, deep references — read the relevant one before implementing |
