@@ -1,2 +1,11 @@
 /// <reference types="vite/client" />
-// Task 7 adds the window.jobpin bridge typing here.
+
+interface JobpinBridge {
+  getServerPort(): Promise<number>
+  getAppInfo(): Promise<{ version: string; dataDir: string }>
+  openDataFolder(): Promise<void>
+}
+
+interface Window {
+  jobpin: JobpinBridge
+}
