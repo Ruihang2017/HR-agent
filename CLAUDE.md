@@ -21,18 +21,18 @@ intake (bounded Q&A, max 5) → jd_gen + rubric → lint → parse → redact
   → score (one call per criterion) → human review UI → kit_gen → question_filter
 ```
 
-- Each stage in `backend/pipeline/` is a typed function `(PydanticModel, ctx) -> PydanticModel` wrapping one focused Claude call.
+- Each stage in `backend/pipeline/` is a typed function `(PydanticModel, ctx) -> PydanticModel` wrapping one focused OpenAI call.
 - Guardrail stages (`lint`, `redact`, `question_filter`) are **slots** in `backend/guardrails/` — Phase 1 ships stubs (regex-only redaction, pass-through linter/filter); Phase 2 swaps real implementations behind the same interfaces. Do not bypass or inline a slot.
 - Data model (PRD §8): `Job → Rubric → Application → ScoreReport → DecisionEvent`, plus `InterviewKit` and append-only `AuditEvent`.
 
 ## LLM layer rules (backend/llm/)
 
-- All model calls go through the single `llm.call()` wrapper — it persists stage, model, prompt_version, redacted inputs, output, and token usage as an `AuditEvent`. Never call the Anthropic SDK directly from a pipeline stage.
-- **Structured outputs only:** `client.messages.parse()` with a Pydantic model. No hand-parsing JSON from text. Validation errors: retry once, then flag "needs manual review".
-- **Model tiering** (per-stage in config): `claude-haiku-4-5` for parsing/redaction assistance; `claude-opus-4-8` for JD/rubric generation, scoring, kits, linter/filter reasoning.
-- **No `temperature` on `claude-opus-4-8`** — the API rejects it (400). Scoring consistency (F3.4) comes from per-criterion calls, strict schemas, frozen versioned prompts, and the golden-set regression test. Don't add sampling params.
+- All model calls go through the single `call_structured()` wrapper in `shortlist/llm/client.py` — it persists stage, model, prompt_version, redacted inputs, output, and token usage as an `AuditEvent`. Never call the OpenAI SDK directly from a pipeline stage. The API key is read from `backend/.env` (`OPENAI_API_KEY`).
+- **Structured outputs only:** `client.beta.chat.completions.parse()` with a Pydantic model passed as `response_format`; read the result from `response.choices[0].message.parsed`. No hand-parsing JSON from text. Validation errors: retry once, then flag "needs manual review".
+- **Model tiering** (per-stage in config): `gpt-4o-mini` for parsing/redaction assistance; `gpt-4o` for JD/rubric generation, scoring, kits, linter/filter reasoning. Model IDs are config-driven — override via `SHORTLIST_MODEL_FAST` / `SHORTLIST_MODEL_STRONG`.
+- **Scoring consistency (F3.4)** comes from per-criterion calls, strict schemas, and frozen versioned prompts (plus the golden-set regression test) — not sampling luck. We pass no `temperature`/`top_p`, which keeps the wrapper portable across model families (including reasoning models that reject them); a low temperature is available as a config lever for non-reasoning models if a run ever needs it.
 - Prompts live in the versioned prompt registry, not inline in stage code. Changing a prompt bumps its version; scoring-prompt changes must pass the golden-set regression.
-- Prompt caching: system prompt + rubric are the stable cached prefix for scoring runs — keep them byte-identical across candidates of a job; put per-candidate content after them.
+- Prompt caching: OpenAI caches long, stable prompt prefixes automatically (no `cache_control` needed). Keep the system prompt + rubric first and byte-identical across candidates of a job, and put per-candidate content after them, so those cache hits land.
 - Resume content is **untrusted input** (prompt-injection surface). Keep it delimited in prompts; never let it into system prompts.
 
 ## Product invariants (never violate, any phase)

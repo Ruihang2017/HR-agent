@@ -99,7 +99,7 @@ Secondary user (for demo purposes): the candidate, who interacts only with a sim
 - **Privacy.** Resumes are personal information. Even where a small business is exempt from parts of the Privacy Act, the system behaves as if it isn't: candidate data is stored encrypted at rest, retained per-job with a configurable window (default 6 months post-close), deletable on request via a single action, and never used to train anything. The application form states what happens to the data.
 - **Auditability.** Every model call that affects a candidate outcome logs its inputs (redacted), outputs, model version, and prompt version. Reproducibility of a decision trail matters more here than latency.
 - **Determinism where it counts.** Redaction rules and the unlawful-question category list are code/config, not model vibes. The model interprets; the rules decide.
-- **Cost envelope.** Design for a cheap default model on parsing/redaction and a stronger model on scoring and generation; a 50-resume screening run should cost cents, not dollars.
+- **Cost envelope.** Design for a cheap default model on parsing/redaction and a stronger model on scoring and generation (implemented on OpenAI: `gpt-4o-mini` for parse/redact, `gpt-4o` for intake, JD/rubric, scoring, kits, and guardrail reasoning); a 50-resume screening run should cost cents, not dollars.
 - **Honesty in failure.** Parsing or scoring failures surface as "needs manual review," never as a silent zero score.
 
 ## 8. Data model (sketch)
@@ -126,7 +126,7 @@ Secondary user (for demo purposes): the candidate, who interacts only with a sim
 
 ## 11. Open questions
 
-1. Stack: not yet chosen. Leading option should optimise for speed of iteration on prompts and schemas (e.g., a lightweight web framework + LLM API + SQLite/Postgres), not framework novelty.
+1. Stack: **decided.** FastAPI + SQLAlchemy/SQLite backend, Vite + React + TypeScript + Tailwind frontend, and the **OpenAI API** for all model calls (structured outputs via `client.beta.chat.completions.parse()` with Pydantic schemas). Model tiering: `gpt-4o-mini` for parsing/redaction, `gpt-4o` for generation, scoring, and guardrail reasoning. Chosen to optimise speed of iteration on prompts and schemas over framework novelty.
 2. Should the candidate-facing form include an optional voluntary EEO-style question set, or is that over-engineering for a small-business context?
 3. Interview kit delivery: in-app only, or also email/PDF to Sam?
 4. Whether to add a post-interview stage (structured note capture against the rubric) as a phase 6 — natural extension, but risks stalling phases 1–5.

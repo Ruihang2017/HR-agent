@@ -1,15 +1,19 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SHORTLIST_", env_file=".env", extra="ignore")
 
+    # Standard OpenAI key. The explicit alias bypasses the SHORTLIST_ prefix, and
+    # pydantic-settings also reads it from backend/.env — so no shell export needed.
+    openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     db_path: str = "shortlist.db"
     data_dir: Path = Path(__file__).resolve().parents[2] / "data"
-    model_fast: str = "claude-haiku-4-5"
-    model_strong: str = "claude-opus-4-8"
+    model_fast: str = "gpt-4o-mini"
+    model_strong: str = "gpt-4o"
     max_intake_questions: int = 5
 
 

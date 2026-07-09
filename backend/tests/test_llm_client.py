@@ -19,7 +19,7 @@ def test_success_writes_audit_event(db, fake_llm):
     assert audit.input_tokens == 10
     # the call used the strong model and NO sampling params
     kwargs = fake_llm.calls[0]
-    assert kwargs["model"] == "claude-opus-4-8"
+    assert kwargs["model"] == "gpt-4o"
     assert "temperature" not in kwargs
 
 
@@ -44,11 +44,14 @@ def test_two_failures_raises_and_audits(db, fake_llm):
     assert audit.kind == "model_call_failed"
 
 
-def test_cache_system_sets_cache_control(db, fake_llm):
+def test_system_prompt_leads_messages_for_caching(db, fake_llm):
+    # OpenAI caches long, stable prompt prefixes automatically. We keep the system
+    # prompt first and byte-identical so those cache hits land across a scoring run.
     fake_llm.queue.append(ScoreRationale(rationale="x"))
     call_structured(
         db, stage="score", prompt_name="score_rationale",
         variables={"results": "[]"}, output_model=ScoreRationale, cache_system=True,
     )
-    system = fake_llm.calls[0]["system"]
-    assert system[0]["cache_control"] == {"type": "ephemeral"}
+    messages = fake_llm.calls[0]["messages"]
+    assert messages[0]["role"] == "system"
+    assert "temperature" not in fake_llm.calls[0]

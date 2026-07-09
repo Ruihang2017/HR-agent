@@ -1,22 +1,24 @@
 from typing import TypeVar
 
-from anthropic import Anthropic
+from openai import OpenAI
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from shortlist.config import STAGE_MODELS
+from shortlist.config import STAGE_MODELS, settings
 from shortlist.llm.prompts import get_prompt
 from shortlist.models.tables import AuditEvent
 
 T = TypeVar("T", bound=BaseModel)
 
-_client: Anthropic | None = None
+_client: OpenAI | None = None
 
 
-def _get_client() -> Anthropic:
+def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        _client = Anthropic()
+        # api_key comes from backend/.env via settings; None lets the SDK fall back
+        # to the OPENAI_API_KEY environment variable.
+        _client = OpenAI(api_key=settings.openai_api_key)
     return _client
 
 
@@ -35,29 +37,36 @@ def call_structured(
     application_id: int | None = None,
     cache_system: bool = False,
 ) -> T:
-    """The only Anthropic call site. Structured output, one retry, audit trail."""
+    """The only OpenAI call site. Structured output, one retry, audit trail.
+
+    `cache_system` is kept for call-site compatibility and intent: OpenAI caches long,
+    stable prompt prefixes automatically (no cache_control needed), so we simply keep the
+    system prompt first and byte-identical across a scoring run to earn those hits.
+
+    We pass no temperature/top_p: scoring consistency (F3.4) comes from per-criterion
+    calls, strict schemas, and frozen versioned prompts — and omitting sampling params
+    keeps the wrapper portable across model families (incl. reasoning models).
+    """
     prompt = get_prompt(prompt_name)
     model = STAGE_MODELS[stage]
-    system_block: dict = {"type": "text", "text": prompt.system}
-    if cache_system:
-        # Marks the static system prompt as a cache breakpoint. NOTE: on current
-        # Opus-tier models prefixes under 4096 tokens don't cache, so this is a
-        # no-op until Phase 2 restructures the scoring prefix (rubric/resume into
-        # the cached span) and verifies via usage.cache_read_input_tokens.
-        system_block["cache_control"] = {"type": "ephemeral"}
     user_text = prompt.user_template.format(**variables)
+    # System prompt first (stable prefix -> OpenAI automatic prompt caching), then the
+    # per-candidate user content. Resume text stays inside the user message, never system.
+    messages = [
+        {"role": "system", "content": prompt.system},
+        {"role": "user", "content": user_text},
+    ]
 
     last_error: Exception | None = None
     for _attempt in range(2):
         try:
-            response = _get_client().messages.parse(
+            response = _get_client().beta.chat.completions.parse(
                 model=model,
-                max_tokens=8000,
-                system=[system_block],
-                messages=[{"role": "user", "content": user_text}],
-                output_format=output_model,
+                max_completion_tokens=8000,
+                messages=messages,
+                response_format=output_model,
             )
-            parsed = response.parsed_output
+            parsed = response.choices[0].message.parsed
             if parsed is None:
                 raise LLMCallError(f"{stage}: response had no parsed output")
             db.add(
@@ -73,8 +82,8 @@ def call_structured(
                         "variables": {k: str(v)[:2000] for k, v in variables.items()},
                         "output": parsed.model_dump(),
                     },
-                    input_tokens=response.usage.input_tokens,
-                    output_tokens=response.usage.output_tokens,
+                    input_tokens=response.usage.prompt_tokens,
+                    output_tokens=response.usage.completion_tokens,
                 )
             )
             db.commit()

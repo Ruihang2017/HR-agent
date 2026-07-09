@@ -10,13 +10,13 @@ slots, clearly labelled in the UI; they become real in Phase 2.
 
 ## Run it
 
-Prereqs: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node 20+, an Anthropic API key.
+Prereqs: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node 20+, an OpenAI API key.
 
 ```bash
 # backend
 cd backend
 uv sync
-set ANTHROPIC_API_KEY=sk-ant-...   # PowerShell: $env:ANTHROPIC_API_KEY="sk-ant-..."
+cp .env.example .env               # then edit .env: OPENAI_API_KEY=sk-...  (Windows: copy .env.example .env)
 uv run uvicorn shortlist.app.main:app --port 8000
 
 # frontend (second terminal)
@@ -27,15 +27,15 @@ npm run dev                         # http://localhost:5173
 
 Demo flow: **New job** → describe the role in plain language → answer up to 5
 intake questions → review the generated JD + scoring rubric → **Seed 50 + screen**
-(synthetic resumes; parsing runs on Haiku to keep costs down — prompt-cache
-savings on scoring land in Phase 2) → review the ranked, identity-blind shortlist →
+(synthetic resumes; parsing runs on gpt-4o-mini to keep costs down; OpenAI
+caches the stable scoring prefix automatically) → review the ranked, identity-blind shortlist →
 shortlist/hold/reject with notes (every click audited) → generate interview kits.
 
 ## Tests
 
 ```bash
 cd backend
-uv run pytest -v      # no network needed - the Anthropic client is faked
+uv run pytest -v      # no network needed - the OpenAI client is faked
 ```
 
 ## Architecture (short version)

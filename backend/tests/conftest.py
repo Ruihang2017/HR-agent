@@ -20,12 +20,14 @@ from types import SimpleNamespace
 
 
 class FakeResponse:
-    def __init__(self, parsed_output):
-        self.parsed_output = parsed_output
-        self.usage = SimpleNamespace(input_tokens=10, output_tokens=5)
+    """Mirrors an openai ParsedChatCompletion: .choices[0].message.parsed + .usage."""
+
+    def __init__(self, parsed):
+        self.choices = [SimpleNamespace(message=SimpleNamespace(parsed=parsed))]
+        self.usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5)
 
 
-class FakeMessages:
+class FakeParser:
     def __init__(self, owner):
         self._owner = owner
 
@@ -33,7 +35,7 @@ class FakeMessages:
         self._owner.calls.append(kwargs)
         item = self._owner.queue.pop(0)
         if not isinstance(item, Exception):
-            expected = kwargs.get("output_format")
+            expected = kwargs.get("response_format")
             assert expected is not None and isinstance(item, expected), (
                 f"fake_llm queue drift: got {type(item).__name__}, call wanted {expected.__name__}"
             )
@@ -43,10 +45,13 @@ class FakeMessages:
 
 
 class FakeClient:
+    """Mimics openai.OpenAI().beta.chat.completions.parse(...)."""
+
     def __init__(self):
         self.queue: list = []
         self.calls: list[dict] = []
-        self.messages = FakeMessages(self)
+        parser = FakeParser(self)
+        self.beta = SimpleNamespace(chat=SimpleNamespace(completions=parser))
 
 
 @pytest.fixture()

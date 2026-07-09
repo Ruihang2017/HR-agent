@@ -41,9 +41,9 @@ def test_scores_each_criterion_and_aggregates(db, fake_llm):
     row = db.query(ScoreReport).filter_by(application_id=app_row.id).one()
     assert row.overall == 3.2
     assert row.prompt_version == 1
-    # scoring calls used the cached stable prefix
-    scoring_calls = [c for c in fake_llm.calls if "Criterion (JSON)" in c["messages"][0]["content"]]
-    assert all("cache_control" in c["system"][0] for c in scoring_calls)
+    # scoring calls lead with the stable system prefix (enables OpenAI's automatic caching)
+    scoring_calls = [c for c in fake_llm.calls if "Criterion (JSON)" in c["messages"][1]["content"]]
+    assert scoring_calls and all(c["messages"][0]["role"] == "system" for c in scoring_calls)
 
 
 def test_failed_must_have_never_rejects(db, fake_llm):
