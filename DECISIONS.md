@@ -8,139 +8,230 @@ When a decision changes, add a **new** entry that supersedes the old one — mar
 
 Format per entry: **Decision · Context · Alternatives · Rationale · Status**.
 
+> Log reset 2026-07-09: entries from the former Shortlist product were cleared together with its
+> implementation. They remain in git history at commit `db5e511`.
+
+## Decision index
+
+The canonical registry of decision IDs referenced throughout `PRD.md` and (eventually) the
+codebase. D-1…D-6 were taken with the project reset and are fully specified here; D-7 onward each
+also have a dated entry below.
+
+| ID | Date | Decision | Rationale |
+|---|---|---|---|
+| **D-1** | 2026-07-09 | **Project reset.** The Shortlist implementation (Phase-1 web POC, cloud OpenAI) was removed; the Jobpin client spec became the new basis (later archived — D-8). Prior state preserved at commit `db5e511`. | Client meeting produced a fundamentally different product (local-first desktop, boss-only); realigning the old codebase would cost more than restarting. |
+| **D-2** | 2026-07-09 | Stack per spec 2: Electron + Node.js local server + SQLite + local files + Handlebars/md→PDF templating. *(The model layer as originally minuted — a local Hermes build — is superseded by D-9.)* | Spec-mandated; local-first data is the product's identity, not an implementation detail. |
+| **D-3** | 2026-07-09 | Frontend framework: **React** (spec offers React/Vue). | Team continuity — prior work was React + TypeScript; no spec conflict. |
+| **D-4** | 2026-07-09 | Invariants adopted as product law (PRD section 11.1): boss decides / AI ranks; evidence + confidence on every conclusion; sensitive attributes flagged "not for decisions", never used; immutable ranking snapshots; propose→approve→write for memory. | Direct from spec 4.3/4.5/6/8/10; these shape every phase. |
+| **D-5** | 2026-07-09 | Sensitive-information handling is **flag-and-exclude** ("must not be used for decisions"), not redaction. | Spec 8 defines the mechanism; differs deliberately from the previous product's identity-blind redaction. |
+| **D-6** | 2026-07-09 | MVP scope cut exactly at spec 9: STT/TTS voice and legal-document (offer/contract) generation are **post-MVP**; MVP emails are templates only, nothing is ever auto-sent. *(Gmail, originally post-MVP here, was later descoped to a non-goal — D-15.)* | Spec 9 is explicit; spec 4 features not in spec 9 are sequenced after MVP. |
+| **D-7** | 2026-07-09 | **English-first product language**: UI, templates, code, and repo docs in English. Chinese remains the client-meeting/minutes language only. | Owner decision — the spec's Chinese is a meeting artifact, not a product requirement. |
+| **D-8** | 2026-07-09 | The client spec is **archived as meeting minutes** (`docs/meeting_minutes/2026-07-09-jobpin-technical-spec.md`) now that the PRD has absorbed it in full; the PRD returns to being the single source of truth. Future minutes are applied to the PRD by explicit update. | Owner decision — one living authority, provenance preserved verbatim. |
+| **D-9** | 2026-07-09 | **Model layer: cloud LLM APIs behind a provider-abstraction gateway** — adapters for OpenAI, DeepSeek, and Anthropic (Claude); the customer switches provider/model in settings; provider + model recorded on every analysis *(credential handling superseded by D-10/D-12)*. The archived minutes' "local model / Hermes 魔改版本" line was a **minute-taking error** (owner correction, 2026-07-09): the *app and data* are local; the *model* is an API call. Resolves OQ-1 and OQ-3; amends the model-layer part of D-2. | Owner correction of the minutes; abstracting the model layer from day one keeps providers swappable and feature code provider-free. |
+| **D-10** | 2026-07-09 | **Model access is subscription-based (Cursor-style).** The boss never supplies or manages API keys: they purchase a plan and select from the in-app model catalog that plan unlocks. Implies a vendor-side subscription service for auth/metering — delivery architecture settled by D-12, plans by D-13. Resolves OQ-10. | Owner decision — key management is unacceptable UX for a non-technical boss; subscriptions monetise model access cleanly. |
+| **D-11** | 2026-07-09 | **Free provider choice + risk disclosure; no provider exclusions.** The boss may pick any offered provider; the app flags the data-transit risk (provider jurisdictions/data policies) at model selection, and the terms carry a liability disclaimer — the vendor is not liable for the boss's provider choice. Resolves OQ-11. | Owner decision — target users are too small for per-jurisdiction gating; disclose and disclaim instead of restrict. |
+| **D-12** | 2026-07-09 | **Subscription delivery: token issuance, not a vendor proxy.** The vendor service authenticates the plan and provisions scoped, budget-capped, short-lived provider credentials; the app calls providers **directly** — candidate content never transits vendor infrastructure. Metering via provider budget caps + usage APIs (retrospective), key rotation/revocation on cancel. A vendor proxy is the documented fallback for the free tier only, if abuse demands hard enforcement. Implementation mechanics are Phase 2 design items. | Owner decision — preserves the local-data promise end-to-end; softer quota enforcement is an acceptable trade at this user scale. Rejected: full vendor proxy (hard enforcement, but resumes would transit vendor servers and the vendor becomes a latency/availability/compliance bottleneck). |
+| **D-13** | 2026-07-09 | **Plans: two tiers.** (1) **Free** — limited token allowance, expires after 1 month. (2) **Pro** — A$20/month, larger token allowance. Exact allowances and at-cap behaviour (hard stop vs upgrade prompt) are Phase 2 design details. Resolves OQ-13. | Owner decision — simple two-tier entry, Cursor-style packaging. |
+| **D-14** | 2026-07-09 | **OS targets: cross-platform-safe code, Windows-only shipping for MVP.** Electron makes the codebase portable, but each shipped OS costs installers, code signing (macOS additionally requires an Apple Developer account + notarization or Gatekeeper blocks the app), native-module prebuilds (SQLite), credential-store differences, and per-OS QA. MVP builds, signs, and supports **Windows only**; macOS is added post-MVP when a real user needs it — a packaging/signing task, not a port; Linux out of scope. Resolves OQ-2. | Electron portability is a property of the code, not of shipping; pay each OS's packaging tax only when a user exists. |
+| **D-15** | 2026-07-09 | **Email-service integration (Gmail MCP/API) is a non-goal.** The product generates email *templates* only and never sends email; the boss sends from their own mail client. The minutes' optional-Gmail lines [spec 2, 4.2] are deliberately descoped — the actual requirement is templates. Supersedes the Gmail part of D-6; resolves OQ-4. | Owner reading of the client's intent; mailbox integration adds OAuth/consent/abuse surface with no MVP value, and templates-only structurally satisfies the confirm-before-send rule [spec 8]. |
+| **D-16** | 2026-07-09 | **Australia-first market; developer-supplied, lawyer-reviewed template content.** Legal and onboarding template content is supplied by the development side and lawyer-reviewed, AU jurisdiction. Repo home: **`templates/au/legal/` and `templates/au/onboarding/`** — bundled as app defaults, copied to `jobpin-data/company/legal_templates/` and `onboarding_templates/` at runtime. Every template carries a version + jurisdiction tag (F6.3). Resolves OQ-6. | Owner decision; a fixed repo home means lawyer-reviewed content has a landing place before Phase 4 wires it. |
+| **D-17** | 2026-07-09 | **Encryption scope: candidate data only.** The `candidates/` trees and candidate-bearing DB content are encrypted at rest (Phase 5); company/job files stay plain, preserving file-first transparency (PRD section 7). Mechanism (key management, file vs DB layer, backup format) is Phase 5 design. Resolves the scope half of OQ-7. | Owner decision — the PII lives in candidate data; the boss's own material stays boss-editable plain text. |
+| **D-18** | 2026-07-09 | **Jobpin-platform integration is a non-goal** — no plugin, import/export bridge, or sync layer; the minutes' future-integration note [spec 1] is descoped. Resolves OQ-8. | Owner decision; zero coupling keeps the product independent. |
+| **D-19** | 2026-07-09 | **Onboarding document generation (F6.2, spec task 13) is immediately post-MVP** — the first backlog item after MVP ships; PRD Phase 4 covers email templates only (spec task 12). Resolves OQ-9 in favour of the spec 9 MVP list. | Owner decision; matches the spec's MVP list exactly while keeping task 13 next in line. |
+| **D-20** | 2026-07-09 | **PRD v2.7 cleanup:** decision log consolidated into this file (this index is the canonical D-registry); PRD Open-questions and Glossary sections removed (all resolved); "§" symbols replaced with plain section references; PRD sections renumbered (Implementation plan → 10, Cross-cutting → 11); DB key fields rendered as a code block. | Owner directive — one home per kind of content; "§" was unreadable to the team; duplicated decision content in two files invites drift. |
+
 ---
 
-### 2026-07-09 — PRD v1.0: comprehensive single-source-of-truth rewrite
-**Decision:** Rewrite `PRD.md` (v0.1 draft → v1.0 canonical) as a fully self-contained SSOT:
-product definition, verified current state, architecture, decisions log, phase-by-phase plan
-(workstream briefs), cross-cutting conventions, consolidated open questions, glossary. Introduce
-stable identifiers — `D-n` (decisions), `WS-x.y` (phase workstreams), `OQ-n` (open questions) —
-and **preserve §1–§8 topic numbering and all F-numbers from v0.1** because code docstrings,
-tests, the roadmap, and handovers cite them; §9+ is restructured with an old→new mapping in the
-document header.
-**Context:** The v0.1 PRD predated implementation and had drifted from the code (e.g. the hosted
-application form F2.1 is unimplemented and was unscheduled; the linter/filter/redaction are
-labelled stubs; the provider is now OpenAI). Future Claude Code sessions need one document that
-reflects reality and scopes the remaining work.
-**Alternatives:** Keep the PRD as pure requirements and scatter state/plan across roadmap +
-handovers (rejected — future sessions would need to reconcile four documents); renumber sections
-freely (rejected — orphans `PRD §8` / `F3.3`-style references across the repo).
-**Rationale:** One canonical navigation point; divergences documented explicitly instead of
-silently patched; each Phase 2/3 workstream written as a self-contained brief so per-phase design
-sessions can start from a single section. PRD §11 summarises this log as D-1…D-10; this file
-remains the running append log.
-**Status:** Active. See `docs/handover/2026-07-09-docs-governance-and-prd-v1.md`.
+### 2026-07-09 — PRD v2.7 cleanup: decision log consolidated here (D-20)
+**Decision:** The PRD's "Key decisions log" section moved into this file — the **decision index
+above is now the canonical D-number registry** (D-1…D-6 had previously been specified only in the
+PRD's table). The PRD's Open-questions and Glossary sections were removed (every question is
+resolved; the resolutions are recorded in the entries below), all "§" symbols in the PRD were
+replaced with plain section references, the PRD's remaining sections were renumbered
+(Implementation plan → 10, Cross-cutting concerns → 11), and the DB key-field list became a code
+block.
+**Context:** Owner directive — the team found "§" unreadable, and holding decision content in two
+files invited drift.
+**Alternatives:** Keeping a summary table in the PRD alongside this log (rejected — two homes for
+the same content drift apart).
+**Rationale:** One home per kind of content: requirements and plan in the PRD, decisions here,
+minutes in `docs/meeting_minutes/`.
+**Status:** Active. PRD v2.7.
 
-### 2026-07-09 — Documentation governance: generic CLAUDE.md, DECISIONS.md, docs/handover/
-**Decision:** Reframe `CLAUDE.md` as a project-agnostic working agreement (process rules only),
-and introduce two artifacts: this `DECISIONS.md` (decision log) and `docs/handover/` (one
-handover file per major implementation or phase). The rules: `PRD.md` is the source of truth
-and is not edited without an explicit ask; `CLAUDE.md` is likewise not self-edited; `README.md`
-is updated after every major task.
-**Context:** Project knowledge and process rules were mixed into `CLAUDE.md`, and there was no
-durable record of *why* choices were made or a consistent way to hand work off between sessions.
-**Alternatives:** Keep project specifics in `CLAUDE.md` (rejected — couples process to one
-project and bloats the always-loaded context); track decisions only in git history (rejected —
-commit messages capture *what*, not the weighed *why*).
-**Rationale:** Separates durable process (CLAUDE.md) from requirements (PRD), rationale
-(DECISIONS), and implementation state (handovers) — each with one clear home.
-**Status:** Active.
+### 2026-07-09 — Scope close-out: all remaining open questions resolved (D-15…D-19)
+**Decision:** Five owner scoping calls, closing every open question in the PRD:
+1. **Gmail integration → non-goal (D-15).** The minutes' optional Gmail MCP/API lines are
+   descoped — the actual requirement is email *templates*. The product never sends email; the
+   boss sends from their own mail client (which structurally satisfies the spec 8
+   confirm-before-send rule). Supersedes the Gmail half of D-6.
+2. **AU-first, developer-supplied templates (D-16).** Legal/onboarding template content is
+   supplied by the development side and lawyer-reviewed. Repo home: `templates/au/{emails,
+   onboarding,legal}/` (README added) — bundled as app defaults, copied into
+   `jobpin-data/company/…` at runtime. Every template versioned + jurisdiction-tagged.
+3. **Encryption scope: candidate data only (D-17).** `candidates/` trees + candidate-bearing DB
+   content encrypted at rest; company/job files stay plain (file-first transparency preserved).
+   Mechanism (keys, layer, backup format) at Phase 5 design.
+4. **Jobpin-platform integration → non-goal (D-18).** No plugin, import/export bridge, or sync.
+5. **Onboarding document generation → immediately post-MVP (D-19).** Phase 4 = email templates
+   only (spec task 12); task 13 becomes the first backlog item — matching the spec 9 MVP list.
+Additionally, **OQ-12 is closed into Phase 2 design**: the architecture (D-12) and tiers (D-13)
+are set; key TTL/rotation, per-provider budget APIs, abuse controls, and at-cap behaviour are
+engineering design items listed in the Phase 2 brief, not open product questions.
+**Context:** Owner directives, 2026-07-09. With these, the PRD has **zero open questions**;
+Phase 0 can start.
+**Alternatives:** Keeping Gmail/Jobpin integration as post-MVP backlog items (rejected — "not
+scheduled" reads as "coming"; non-goal is the honest label until an explicit re-scope); scheduling
+onboarding docs inside MVP Phase 4 (rejected — the spec 9 MVP list names only the email).
+**Rationale:** Cut integration surface to essentials, match the spec's MVP list exactly, encrypt
+what carries PII while keeping the boss's own files editable, and give lawyer-reviewed content a
+fixed landing place before it is needed.
+**Status:** Active. D-15…D-19 (index above); the PRD's open-questions section then read "None"
+and was removed entirely in the v2.7 cleanup (D-20).
 
-### 2026-07-09 — LLM provider: OpenAI (migrated off Anthropic)
-**Decision:** Use the **OpenAI API** for all model calls. Structured outputs via
-`client.beta.chat.completions.parse()` with Pydantic schemas passed as `response_format`.
-Model tiering: `gpt-4o-mini` (parse/redact) and `gpt-4o` (intake, JD/rubric, scoring, kits,
-guardrail reasoning), both config-overridable. The key is read from `backend/.env`
-(`OPENAI_API_KEY`); `.env` is gitignored, with `backend/.env.example` as the committed template.
-No `temperature`/`top_p` is sent — consistency (F3.4) comes from per-criterion calls, strict
-schemas, and frozen versioned prompts, and omitting sampling params keeps the wrapper portable
-across model families (including reasoning models that reject them). OpenAI caches stable prompt
-prefixes automatically, so the earlier manual `cache_control` breakpoint was removed.
-**Context:** User directive to switch providers. Phase 1 had been built on the Anthropic SDK
-(`messages.parse()`, `claude-*` models, a manual cache breakpoint).
-**Alternatives:** Stay on Anthropic (rejected per directive); keep the Anthropic-era
-no-temperature rule as a hard constraint (relaxed — low temperature is now available as a
-config lever for non-reasoning models if ever needed).
-**Rationale:** User preference; OpenAI's structured-output parse maps cleanly onto the existing
-`call_structured()` wrapper with no change to pipeline stages.
-**Open risk:** Tests use a fake client, so the real strict-mode structured-output path is
-unverified. A few schemas carry numeric/length bounds (`weight` ge/le, `score` 0–5,
-`min_length=1` on rubric/kit lists) that OpenAI strict mode may reject on the first live call —
-run a live smoke test with a real key and harden schemas if needed.
-**Status:** Active. Supersedes the implicit Anthropic provider choice from Phase 1.
-See `docs/handover/2026-07-09-openai-migration.md`.
+### 2026-07-09 — OS targets: cross-platform-safe code, Windows-only shipping for MVP
+**Decision:** The Electron codebase is kept **cross-platform-safe** (no Windows-only path,
+process, or credential assumptions; cross-platform Electron APIs like `safeStorage` for secrets),
+but the MVP **builds, signs, and supports Windows only**. macOS is added post-MVP when a real
+mac-using customer appears — at that point it is a packaging/signing task (installer target,
+Apple Developer account, notarization, mac QA), not a port. Linux is out of scope for the boss
+persona.
+**Context:** Owner question resolving PRD OQ-2 ("Electron is compatible with all OS, right?").
+Electron makes the *code* portable; it does not make *shipping* free — each supported OS costs
+per-release installers, code signing (macOS requires Apple Developer membership + notarization or
+Gatekeeper blocks the app), native-module prebuilds (SQLite), and per-OS QA.
+**Alternatives:** Ship Windows + macOS in MVP (rejected for now — pays the mac packaging tax with
+no known mac user; easily reversed later); non-Electron native stacks (never in scope — spec
+mandates Electron).
+**Rationale:** Pay each OS's shipping cost only when a user exists, while keeping the reversal
+cheap by writing portable code from day one.
+**Status:** Active. D-14 (index above); resolves OQ-2.
 
-### 2026-07-07 — Phase 1 scope: full workflow end-to-end, guardrails as stub slots
-**Decision:** Ship the entire pipeline (intake → JD/rubric → parse → redact → score → human
-review → kit) with the three compliance guardrails (`lint`, `redact`, `question_filter`)
-implemented as honest **stubs behind stable interfaces** — regex-only redaction, pass-through
-linter/filter that report `implemented: false` so the UI can label them. Real implementations
-swap in during Phase 2 without touching pipeline stages.
-**Context:** Fastest path to a demonstrable end-to-end agent; the hard compliance/harnessing
-work (RAG grounding, bias harness, layered redaction) is large and shouldn't block the workflow.
-**Alternatives:** Build real guardrails first (rejected — delays a working demo and risks over-
-investing before the pipeline shape is proven).
-**Rationale:** Prove the pipeline and its data model early; keep guardrails as swappable slots.
-**Status:** Active. See `docs/handover/2026-07-07-phase-1-core-workflow.md`.
+### 2026-07-09 — Subscription delivery: token issuance, not a vendor proxy
+**Decision:** The subscription service delivers model access by **token issuance**: it validates
+the boss's plan and provisions scoped, budget-capped, short-lived provider credentials; the app
+then calls OpenAI/DeepSeek/Anthropic **directly**. Candidate content never transits vendor
+infrastructure — in either direction. Metering uses provider-side budget caps plus usage APIs
+(retrospective); keys rotate on short TTLs and are revoked on cancel.
+**Context:** Owner decision after reviewing both architectures. In both models the vendor owns
+the provider accounts and pays the bills; the difference is the data path and the enforcement
+point.
+**Alternatives:** Full vendor proxy — app → vendor gateway → provider (rejected: hard real-time
+quota enforcement and unextractable keys, but every resume would transit vendor servers, killing
+the product's local-data promise, adding a latency/availability bottleneck, and giving the vendor
+a PII compliance surface). Kept as a **documented fallback for the free tier only**, if
+disposable-install abuse ever demands hard enforcement.
+**Rationale:** Preserves "candidate data never touches our infrastructure" end-to-end; the cost —
+softer, retrospective quota enforcement and briefly-extractable keys — is acceptable at this user
+scale and mitigated by tight per-key budgets and rotation.
+**Known risk:** per-provider admin/budget API support is uneven — DeepSeek's controls are the
+thinnest; Phase 2 must confirm or proxy DeepSeek only.
+**Status:** Active. D-12 (index above); implementation mechanics live in the PRD Phase 2 brief.
 
-### 2026-07-06 — Delivery order differs from the PRD milestones
-**Decision:** Build in three phases — (1) core agent workflow end-to-end, (2) real guardrails +
-harnessing + security, (3) demo polish + pilot-readiness — rather than following the PRD's
-feature-milestone order.
-**Context:** The PRD lists milestones by feature area; a working skeleton first de-risks the
-architecture and gives something to demo sooner.
-**Alternatives:** Follow PRD milestone order (rejected — front-loads compliance depth before the
-end-to-end shape exists).
-**Rationale:** Working pipeline first, then harden, then polish.
-**Status:** Active. Tracked in `docs/superpowers/plans/2026-07-06-shortlist-poc-roadmap.md`.
+### 2026-07-09 — Plans: Free (limited, 1 month) + Pro (A$20/month)
+**Decision:** Two subscription tiers at launch: **Free** — limited token allowance, expires after
+one month; **Pro** — A$20/month with a larger token allowance. Exact allowances and at-cap
+behaviour (hard stop vs upgrade prompt) are Phase 2 design details.
+**Context:** Owner decision resolving PRD OQ-13; Cursor-style packaging on top of D-10/D-12.
+**Alternatives:** More tiers / usage-based billing (deferred — start simple, revisit with real
+usage data).
+**Rationale:** A free on-ramp for trial plus one simple paid tier matches a small-business,
+low-touch sales motion.
+**Status:** Active. D-13 (index above).
 
-### 2026-07-06 — Human decision gate is a hard invariant
-**Decision:** No candidate is ever rejected, ranked out, or advanced without an explicit human
-action. No bulk or system-initiated actions. Must-have failures surface in a visible "did not
-meet stated requirements" section — never auto-rejected. Every AI output and human decision is
-appended to an audit trail.
-**Context:** PRD F3.3 / F4.2 / F4.3 and alignment with Fair Work's position that AI may assist
-but not solely determine hiring decisions.
-**Alternatives:** Auto-filter obvious non-matches (rejected — violates the product's core
-fairness/compliance stance).
-**Rationale:** This is a load-bearing product and legal constraint, treated as an invariant, not
-a feature.
-**Status:** Active (permanent invariant).
+### 2026-07-09 — Model access: subscription-based, Cursor-style (no user API keys)
+**Decision:** The boss never supplies or manages API keys. Model access is sold as a
+**subscription**: the boss purchases a plan and selects from the in-app **model catalog** that
+plan unlocks — the same pattern as Cursor. This implies a vendor-side subscription service for
+plan auth and usage metering; that service never stores candidate data.
+**Context:** Owner directive resolving PRD OQ-10. Target users are non-technical small-business
+owners; asking them to obtain provider API keys is unacceptable UX.
+**Alternatives:** Bring-your-own-key (rejected — UX burden, support burden, no monetisation of
+model access); embedding a shared vendor key in the app (rejected — insecure, unmeterable).
+**Rationale:** Clean UX and clean monetisation; the gateway abstraction (D-9) already isolates
+providers, so subscription credentials slot in behind the same interface.
+**Status:** Active. D-10 (index above); resolves OQ-10; the delivery architecture and plan tiers
+were subsequently settled by D-12 and D-13.
 
-### 2026-07-06 — Code-orchestrated pipeline, not an agent loop
-**Decision:** Code controls the stage sequence; the model never controls flow. Each stage is a
-typed function `(PydanticModel, ctx) -> PydanticModel` wrapping one focused model call.
-**Context:** Hiring decisions demand determinism, inspectability, and a reproducible audit trail.
-**Alternatives:** An autonomous tool-calling agent loop (rejected — opaque control flow, harder
-to audit and to guarantee invariants).
-**Rationale:** Predictable, testable, auditable; every stage's structured output is inspectable.
-**Status:** Active.
+### 2026-07-09 — Provider risk: disclose and disclaim, don't restrict
+**Decision:** The boss may choose **any provider the app offers** (OpenAI, DeepSeek, Anthropic
+Claude) regardless of jurisdiction or data policy. The app **flags the risk** at model selection
+(candidate content transits the chosen provider) and the terms carry a **liability disclaimer**
+so the vendor is not liable for the boss's provider choice. No provider exclusions.
+**Context:** Owner directive resolving PRD OQ-11: target users are too small to warrant
+per-jurisdiction provider gating.
+**Alternatives:** Excluding providers by jurisdiction or gating sensitive data per provider
+(rejected — disproportionate complexity for the user base; revisit only if a client demands it).
+**Rationale:** Freedom of choice with informed consent; engineering ships the disclosure
+mechanism, legal wording comes with the terms.
+**Status:** Active. D-11 (index above); resolves OQ-11.
 
-### 2026-07-06 — Single audit-logging LLM wrapper with structured outputs
-**Decision:** All model calls go through one `call_structured()` site that uses structured
-(Pydantic) outputs and persists an `AuditEvent` (stage, model, prompt version, redacted inputs,
-output, token usage) per call. Prompts live in a versioned registry, not inline. Validation
-failures retry once, then flag "needs manual review" — never a silent zero.
-**Context:** PRD NFRs on auditability, determinism-where-it-counts, and honesty-in-failure.
-**Alternatives:** Ad-hoc SDK calls per stage with hand-parsed JSON (rejected — no audit trail,
-fragile parsing, prompt drift).
-**Rationale:** One choke point makes auditing, model tiering, and prompt versioning uniform.
-**Status:** Active. (SDK-specific mechanics updated by the 2026-07-09 OpenAI decision.)
+### 2026-07-09 — Model layer: cloud APIs behind a switchable provider gateway (minutes correction)
+**Decision:** The AI layer uses **cloud model APIs behind a provider-abstraction gateway** built
+from day one: adapters for OpenAI, DeepSeek, and Anthropic (Claude); the customer switches
+provider/model in settings; every analysis records the provider + model that produced it. The
+archived minutes' line "AI：本地模型优先，Hermes 魔改版本" was a **minute-taking error** by a
+colleague summarising the client — the correct requirement: the *app and runtime* are locally
+deployed and all *data* stays local, while the *model* is an API call.
+**Context:** Owner correction on 2026-07-09 while resolving PRD OQ-1 (what "Hermes modified
+build" meant). No local LLM ships with the product; the minutes file stays verbatim (minutes are
+input, the PRD is truth — the correction lives here and in the PRD).
+**Alternatives:** Local LLM runtime as minuted (void — transcription error); a single hard-coded
+provider (rejected — the client explicitly wants switchability, and the previous product's
+provider migration showed the cost of a hard-coded SDK).
+**Rationale:** Provider abstraction from day one keeps feature code provider-free, enables
+cost/quality trade-offs per provider, and removes the local-hardware constraint entirely.
+**Status:** Active. D-9 (index above); resolves PRD OQ-1/OQ-3; amends D-2's model line; raised
+OQ-10 (key provisioning → D-10) and OQ-11 (data-transit disclosure → D-11).
 
-### 2026-07-06 — Two-tier model routing for the cost envelope
-**Decision:** Route cheap/mechanical stages (parse, redact) to a small model and
-generation/scoring stages to a stronger model, configured per-stage rather than hardcoded.
-**Context:** PRD cost envelope — a 50-resume screening run should cost cents, not dollars.
-**Alternatives:** One model for everything (rejected — either too costly or too weak).
-**Rationale:** Match model strength to task difficulty to keep runs cheap without hurting quality.
-**Status:** Active. Concrete models set by the 2026-07-09 OpenAI decision.
+### 2026-07-09 — Client spec archived as meeting minutes; PRD restored as single source of truth
+**Decision:** With `PRD.md` v2.x having absorbed the client technical spec in full, the spec moves
+to `docs/meeting_minutes/2026-07-09-jobpin-technical-spec.md` (verbatim, dated). The temporary
+hierarchy "spec > PRD" from the reset entry below is dissolved: **the PRD is again the single
+source of truth**, and future client meetings produce new dated minutes under
+`docs/meeting_minutes/` that are applied to the PRD by explicit update.
+**Context:** Owner directive after the PRD rewrite. Keeping two competing authorities invites
+drift; the spec's value is provenance, which the archive preserves (PRD citations like
+*[spec 4.3]* point into the archived document).
+**Alternatives:** Keep the spec at the repo root as standing upstream authority (rejected — every
+future clarification would need edits in two places); delete it after absorption (rejected —
+loses provenance and the PRD's citation targets).
+**Rationale:** One living document to trust; a clean minutes-in → PRD-updated workflow for future
+meetings. Conveniently, `CLAUDE.md` rule 1 ("PRD is the source of truth") is again literally true
+with no amendment needed.
+**Status:** Active. Recorded as D-8 (index above).
 
-### 2026-07-06 — Stack: FastAPI + SQLAlchemy/SQLite; Vite + React + TS + Tailwind
-**Decision:** Python 3.12 backend (FastAPI, SQLAlchemy 2.0, Pydantic v2, SQLite, `uv`); frontend
-in Vite + React + TypeScript + Tailwind. Single-tenant, demo-quality.
-**Context:** PRD open question on stack; optimise for fast iteration on prompts and schemas over
-framework novelty.
-**Alternatives:** Heavier frameworks / Postgres / a meta-framework (rejected as over-scoped for
-a single-tenant POC).
-**Rationale:** Lightweight, fast to iterate, easy to run locally on a Windows dev machine.
-**Status:** Active.
+### 2026-07-09 — Product language: English-first
+**Decision:** The product UI, templates, code, and repo documentation are English. Chinese remains
+the client-meeting/minutes language only; key Chinese domain terms (老板, 魔改, 八字…) are kept
+inline in the PRD where they aid traceability to the minutes.
+**Context:** The client spec was written in Chinese, which raised the question of product
+language; the owner clarified Chinese is just the development-meeting language.
+**Alternatives:** Chinese-first or bilingual UI (rejected as unrequested scope; can be revisited
+if the client asks).
+**Rationale:** Matches the owner's direction and the AU business context of the product's
+documents and emails.
+**Status:** Active. Recorded as D-7 (index above); resolves PRD OQ-5.
+
+### 2026-07-09 — Project reset: Jobpin replaces Shortlist; client spec becomes upstream authority
+**Decision:** Remove the entire Shortlist implementation (Python/FastAPI backend, React web
+frontend, synthetic data, era-specific plans/specs/handovers) and restart the project as
+**Jobpin — a local-first, boss-only desktop hiring workbench** defined by
+`JOBPIN_TECHNICAL_SPEC.md` (repo root). Document hierarchy from now on: **spec > `PRD.md` > code**;
+on conflict the spec wins. `PRD.md` was rewritten (v2.0) from the spec; this log was cleared.
+The full pre-reset state is preserved at git commit **`db5e511`**
+("chore: snapshot Shortlist POC before Jobpin reset").
+**Context:** An updated client meeting produced the Jobpin technical spec: Electron desktop app,
+Node.js local server, SQLite + local files, a local LLM (Hermes modified build), optional Gmail,
+single boss role, no cloud. The prior product (Australian small-business web POC on a cloud
+OpenAI API with an identity-redaction pipeline) differs in stack, deployment, trust model, and
+core mechanisms (e.g. the spec's flag-and-exclude sensitive-data handling vs redaction).
+**Alternatives:** Incrementally refactor the Shortlist codebase toward Jobpin (rejected — nearly
+nothing survives: different runtime, provider, data model, and product mechanics); keep the old
+docs alongside (rejected — stale F-numbers and phase plans would actively mislead future
+sessions; git history preserves them).
+**Rationale:** A clean slate priced honestly beats a misleading continuity. Base infrastructure
+kept: `CLAUDE.md` working agreement, this log (cleared), `docs/handover/` convention, `README.md`,
+`.gitignore`. The OpenAI key file was preserved at the repo root (`.env`, gitignored) in case a
+cloud fallback is ever approved (it is now useful for the D-9 gateway's dev credentials).
+**Status:** Active. Initial engineering decisions taken with the reset are recorded as D-1…D-6 in
+the index above. See `docs/handover/2026-07-09-jobpin-reset.md`.

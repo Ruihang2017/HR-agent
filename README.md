@@ -1,60 +1,45 @@
-# Shortlist — AI Hiring Assistant (POC)
+# Jobpin — Local-First Hiring Workbench (pre-implementation)
 
-From "I need to hire someone" to a ranked, identity-blind shortlist with
-interview kits — with fairness and legal guardrails at every step.
-See `PRD.md` for requirements and `docs/` for the design spec and plans.
+A boss-only hiring assistant that runs on the boss's own computer:
+Electron desktop app + embedded Node.js local server + SQLite + local files.
+AI analysis calls cloud model APIs (OpenAI / DeepSeek / Claude) through a
+switchable gateway; model access comes with the subscription (Free tier, or
+Pro at A$20/month) — the boss picks a model from the in-app catalog and never
+handles API keys. The app calls providers directly via issued tokens, so
+resumes never transit vendor servers, and all hiring data stays local. One
+role (the boss). The AI analyses and ranks candidates with evidence and
+confidence; the boss makes every decision.
 
-**Status: Phase 1** — core agent workflow end-to-end. Guardrails (discrimination
-linter, layered redaction, unlawful-question filter, bias harness) are stub
-slots, clearly labelled in the UI; they become real in Phase 2.
+**Status:** the project was reset on 2026-07-09 to realign with the client's
+technical spec. **There is no runnable application yet** — implementation
+starts at PRD Phase 0. The previous product ("Shortlist") is preserved in git
+history at commit `db5e511`.
 
 ## Project docs
 
 | Doc | What it holds |
 |---|---|
-| [`PRD.md`](PRD.md) | The source of truth: requirements, current state, architecture, decisions, phased plan |
-| [`DECISIONS.md`](DECISIONS.md) | Dated log of major decisions + rationale |
+| [`PRD.md`](PRD.md) | The source of truth: requirements, architecture, phased plan (English, self-contained) |
+| [`docs/meeting_minutes/`](docs/meeting_minutes/) | Archived client meeting outcomes — incl. the 2026-07-09 technical spec the PRD derives from |
+| [`templates/`](templates/) | Developer-supplied, lawyer-reviewed AU template content (emails, onboarding, legal) |
+| [`DECISIONS.md`](DECISIONS.md) | Decision index (D-1…) + dated log of major decisions and rationale |
 | [`docs/handover/`](docs/handover/) | One handover per major implementation or phase |
-| [`docs/`](docs/) | Design spec and phase plans |
 | [`CLAUDE.md`](CLAUDE.md) | Working agreement for contributors (human or AI) |
+
+## Planned shape (PRD section 9)
+
+```
+Electron (React) ── Node.js local server ── SQLite (index)
+                          │                  jobpin-data/ (substance: MD/JSON/files)
+                          └── model gateway ⇄ OpenAI / DeepSeek / Claude API
+```
+
+MVP journey: create job → import resumes → AI analysis + ranked list with
+immutable ranking snapshots → interview questions → manual interview records →
+re-ranking → invitation & onboarding email templates. All data stays local;
+AI steps call the configured model API.
 
 ## Run it
 
-Prereqs: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node 20+, an OpenAI API key.
-
-```bash
-# backend
-cd backend
-uv sync
-cp .env.example .env               # then edit .env: OPENAI_API_KEY=sk-...  (Windows: copy .env.example .env)
-uv run uvicorn shortlist.app.main:app --port 8000
-
-# frontend (second terminal)
-cd frontend
-npm install
-npm run dev                         # http://localhost:5173
-```
-
-Demo flow: **New job** → describe the role in plain language → answer up to 5
-intake questions → review the generated JD + scoring rubric → **Seed 50 + screen**
-(synthetic resumes; parsing runs on gpt-4o-mini to keep costs down; OpenAI
-caches the stable scoring prefix automatically) → review the ranked, identity-blind shortlist →
-shortlist/hold/reject with notes (every click audited) → generate interview kits.
-
-## Tests
-
-```bash
-cd backend
-uv run pytest -v      # no network needed - the OpenAI client is faked
-```
-
-## Architecture (short version)
-
-Code-orchestrated pipeline — the model never controls flow:
-
-    intake → JD+rubric → lint* → parse → redact* → score (per criterion)
-          → human review gate → kit → question filter*
-
-`*` = guardrail slots (stubs in Phase 1, real in Phase 2). Every model call is
-audit-logged with model + prompt version. Scoring runs on the redacted resume
-only; identity is revealed only at the human-review stage.
+Nothing to run yet. Phase 0 (Electron shell, local server, SQLite schema) is the
+first implementation step — see PRD §11.
