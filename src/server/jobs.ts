@@ -109,3 +109,70 @@ export function setJd({ db, paths }: JobsDeps, id: number, text: string): string
   fs.writeFileSync(path.join(paths.dataRoot, row.jd_path), text, 'utf8')
   return text
 }
+
+/** Every column that stores a jobpin-data-relative path (spec section 5 step 4). */
+const PATH_COLUMNS: Array<[table: string, column: string]> = [
+  ['jobs', 'folder_path'],
+  ['jobs', 'jd_path'],
+  ['jobs', 'inject_path'],
+  ['candidate_documents', 'file_path'],
+  ['candidate_documents', 'extracted_text_path'],
+  ['interviews', 'transcript_path'],
+  ['interviews', 'summary_path'],
+  ['ai_analyses', 'output_path'],
+  ['emails', 'file_path'],
+  ['documents', 'file_path']
+]
+
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, m => '\\' + m)
+}
+
+export function renameJob(deps: JobsDeps, id: number, newName: string): JobDetail {
+  const { db, paths } = deps
+  const name = (newName ?? '').trim()
+  if (!name) throw new ValidationError('job name is required')
+  const row = db.prepare('SELECT id, name, folder_path FROM jobs WHERE id = ?').get(id) as
+    | { id: number; name: string; folder_path: string }
+    | undefined
+  if (!row) throw new NotFoundError(`job ${id} not found`)
+  if (db.prepare('SELECT id FROM jobs WHERE name = ? AND id != ?').get(name, id)) {
+    throw new ConflictError(`a job named "${name}" already exists`)
+  }
+
+  const oldFolderRel = row.folder_path
+  const oldFolderName = oldFolderRel.slice('jobs/'.length)
+  const others = existingFolderNames(paths).filter(n => n !== oldFolderName)
+  const newFolderName = deriveFolderName(name, others)
+
+  const touchName = db.prepare(
+    "UPDATE jobs SET name = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?"
+  )
+
+  if (newFolderName === oldFolderName) {
+    touchName.run(name, id) // display-name-only change; folder already correct
+    return getJob(deps, id)
+  }
+
+  const newFolderRel = `jobs/${newFolderName}`
+  const oldAbs = path.join(paths.dataRoot, oldFolderRel)
+  const newAbs = path.join(paths.dataRoot, newFolderRel)
+
+  fs.renameSync(oldAbs, newAbs) // atomic on the same volume
+  try {
+    db.transaction(() => {
+      touchName.run(name, id)
+      for (const [table, column] of PATH_COLUMNS) {
+        db.prepare(
+          `UPDATE ${table}
+             SET ${column} = ? || substr(${column}, ?)
+           WHERE ${column} = ? OR ${column} LIKE ? ESCAPE '\\'`
+        ).run(newFolderRel, oldFolderRel.length + 1, oldFolderRel, escapeLike(oldFolderRel) + '/%')
+      }
+    })()
+  } catch (e) {
+    fs.renameSync(newAbs, oldAbs) // compensate: put the folder back
+    throw e
+  }
+  return getJob(deps, id)
+}
