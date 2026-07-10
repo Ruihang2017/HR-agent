@@ -43,13 +43,26 @@ export default function JobDetailPage() {
     setEditingJd(false)
   })
 
-  const addFiles = (files: FileList | File[]) => run(async () => {
-    for (const f of Array.from(files)) {
-      const fd = new FormData()
-      fd.append('file', f)
-      await apiUpload(`/jobs/${jobId}/candidates`, 'POST', fd)
-    }
-  })
+  const addFiles = async (files: FileList | File[]) => {
+    setError(null)
+    const list = Array.from(files)
+    const results = await Promise.allSettled(
+      list.map(f => {
+        const fd = new FormData()
+        fd.append('file', f)
+        return apiUpload(`/jobs/${jobId}/candidates`, 'POST', fd)
+      })
+    )
+    const failures = results
+      .map((r, i) =>
+        r.status === 'rejected'
+          ? `${list[i].name}: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`
+          : null
+      )
+      .filter((m): m is string => m !== null)
+    if (failures.length > 0) setError(`Some files failed — ${failures.join(' · ')}`)
+    refresh()
+  }
 
   const addPaste = () => run(async () => {
     await apiJson(`/jobs/${jobId}/candidates`, {

@@ -8,6 +8,7 @@
   --c-bg: #f7f7f8; --c-surface: #ffffff; --c-border: #e3e3e6;
   --c-text: #1b1b1f; --c-text-2: #6b6b74;
   --c-accent: #2a5fd0; --c-accent-hover: #234fae;
+  --c-accent-soft: #e8f0fe; --c-on-accent: #ffffff;
   --c-ok: #1a7f37; --c-warn-bg: #fff4e0; --c-warn-text: #92600a;
   --c-danger: #c0392b;
   --c-sidebar-bg: #14141a; --c-sidebar-text: #d7d7de; --c-sidebar-muted: #8a8a95;

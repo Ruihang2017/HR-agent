@@ -31,7 +31,7 @@ export default function JobsPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <h1 style={{ marginTop: 0 }}>Jobs</h1>
         <button onClick={() => setShowForm(v => !v)} style={{
-          background: 'var(--c-accent)', color: '#fff', border: 'none',
+          background: 'var(--c-accent)', color: 'var(--c-on-accent)', border: 'none',
           padding: 'var(--sp-2) var(--sp-4)', borderRadius: 'var(--radius-sm)'
         }}>New job</button>
       </div>
@@ -56,7 +56,7 @@ export default function JobsPage() {
                        border: '1px solid var(--c-border)', borderRadius: 'var(--radius-sm)' }} />
           </label>
           <button disabled={busy || !name.trim()} onClick={create} style={{
-            background: 'var(--c-accent)', color: '#fff', border: 'none',
+            background: 'var(--c-accent)', color: 'var(--c-on-accent)', border: 'none',
             padding: 'var(--sp-2) var(--sp-4)', borderRadius: 'var(--radius-sm)', opacity: busy || !name.trim() ? 0.5 : 1
           }}>{busy ? 'Creating…' : 'Create job'}</button>
         </div>
