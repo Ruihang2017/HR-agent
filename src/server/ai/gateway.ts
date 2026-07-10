@@ -4,6 +4,8 @@ import { getAiSettings } from './settings'
 import type { Provider } from './catalog'
 import type { Credentials, TokenIssuer } from './subscription'
 import { openaiAdapter } from './adapters/openai'
+import { deepseekAdapter } from './adapters/deepseek'
+import { anthropicAdapter } from './adapters/anthropic'
 
 export type GatewayErrorCode = 'auth' | 'rate_limit' | 'network' | 'timeout' | 'invalid_output' | 'provider_error'
 
@@ -47,12 +49,7 @@ const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms))
 export class Gateway {
   private adapters: Record<Provider, ProviderAdapter>
   constructor(private deps: GatewayDeps) {
-    this.adapters = {
-      openai: openaiAdapter,
-      deepseek: openaiAdapter, // placeholder until Task 5 lands the real adapter
-      anthropic: openaiAdapter, // placeholder until Task 5 lands the real adapter
-      ...deps.adapters
-    }
+    this.adapters = { openai: openaiAdapter, deepseek: deepseekAdapter, anthropic: anthropicAdapter, ...deps.adapters }
   }
 
   async complete<T>(req: CompletionRequest<T>): Promise<CompletionResult<T>> {
