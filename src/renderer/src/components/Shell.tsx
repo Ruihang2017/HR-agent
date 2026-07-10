@@ -31,11 +31,16 @@ export default function Shell() {
       }}>
         <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 'var(--sp-6)' }}>Jobpin</div>
         <nav style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-          <NavLink to="/" style={({ isActive }) => ({
+          <NavLink to="/" end style={({ isActive }) => ({
             padding: 'var(--sp-2) var(--sp-3)', borderRadius: 'var(--radius-sm)', textDecoration: 'none',
             color: isActive ? '#fff' : 'var(--c-sidebar-text)',
             background: isActive ? 'rgba(255,255,255,0.12)' : 'transparent'
           })}>Jobs</NavLink>
+          <NavLink to="/settings" style={({ isActive }) => ({
+            padding: 'var(--sp-2) var(--sp-3)', borderRadius: 'var(--radius-sm)', textDecoration: 'none',
+            color: isActive ? '#fff' : 'var(--c-sidebar-text)',
+            background: isActive ? 'rgba(255,255,255,0.12)' : 'transparent'
+          })}>Settings</NavLink>
         </nav>
         <div style={{ marginTop: 'auto', fontSize: 'var(--text-xs)', color: 'var(--c-sidebar-muted)' }}>
           <NavLink to="/system" style={{ color: 'inherit', textDecoration: 'none' }}>

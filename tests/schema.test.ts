@@ -20,18 +20,18 @@ afterEach(() => {
 })
 
 const EXPECTED_TABLES = [
-  'ai_analyses', 'candidate_documents', 'candidates', 'documents', 'emails',
+  'ai_analyses', 'analysis_tasks', 'candidate_documents', 'candidates', 'documents', 'emails',
   'interview_answers', 'interview_questions', 'interviews', 'jobs',
-  'memory_events', 'migrations', 'ranking_items', 'rankings', 'settings'
+  'memory_events', 'migrations', 'ranking_items', 'rankings', 'settings', 'usage_events'
 ].sort()
 
-describe('migration 0001', () => {
-  it('creates exactly the 13 PRD tables plus migrations bookkeeping', () => {
+describe('migrations', () => {
+  it('creates expected tables after all migrations', () => {
     const tables = (db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
       .all() as { name: string }[]).map(r => r.name).sort()
     expect(tables).toEqual(EXPECTED_TABLES)
-    expect(getSchemaVersion(db)).toBe(1)
+    expect(getSchemaVersion(db)).toBe(2)
   })
 
   it('creates an index on every FK column', () => {
@@ -40,11 +40,13 @@ describe('migration 0001', () => {
       .all() as { name: string }[]).map(r => r.name).sort()
     expect(indices).toEqual([
       'idx_ai_analyses_candidate_id', 'idx_ai_analyses_job_id',
+      'idx_analysis_tasks_candidate_id', 'idx_analysis_tasks_job_id',
       'idx_candidate_documents_candidate_id', 'idx_candidates_job_id',
       'idx_documents_candidate_id', 'idx_emails_candidate_id',
       'idx_interview_answers_question_id', 'idx_interview_questions_interview_id',
       'idx_interviews_candidate_id', 'idx_ranking_items_candidate_id',
-      'idx_ranking_items_ranking_id', 'idx_rankings_job_id'
+      'idx_ranking_items_ranking_id', 'idx_rankings_job_id',
+      'idx_usage_events_created_at'
     ].sort())
   })
 

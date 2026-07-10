@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog } from 'electron'
 import path from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
 import { getPaths } from '../server/paths'
 import { ensureScaffold } from '../server/scaffold'
 import { openDatabase, runMigrations } from '../server/db'
@@ -7,8 +8,27 @@ import { migrations } from '../server/migrations'
 import { createApp } from '../server/app'
 import { startServer } from '../server/serve'
 import { registerIpc } from './ipc'
+import { DevTokenIssuer } from '../server/ai/subscription'
+import { createAiRuntime } from '../server/ai/runtime'
 
 let mainWindow: BrowserWindow | null = null
+
+/** Dev-only .env loader: KEY=VALUE lines, no expansion, never logged. */
+function loadDevEnv(): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = { ...process.env }
+  const envFile = path.join(process.cwd(), '.env')
+  if (!app.isPackaged && existsSync(envFile)) {
+    for (const line of readFileSync(envFile, 'utf8').split(/\r?\n/)) {
+      const m = /^([A-Z0-9_]+)\s*=\s*(.*)$/.exec(line.trim())
+      if (m) {
+        let v = m[2].trim()
+        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1)
+        if (env[m[1]] === undefined) env[m[1]] = v
+      }
+    }
+  }
+  return env
+}
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -53,8 +73,14 @@ if (!gotLock) {
       runMigrations(db, migrations)
 
       // Step 5: start the localhost server on an OS-assigned port.
-      const honoApp = createApp({ db, paths, version: app.getVersion() })
+      const ai = createAiRuntime({ db, paths, issuer: new DevTokenIssuer(loadDevEnv()) })
+      const honoApp = createApp({ db, paths, version: app.getVersion(), ai })
       const { port } = await startServer(honoApp)
+
+      // Boot recovery: any task left 'running' from a previous crash/kill is
+      // requeued, then the workers are kicked to drain the backlog.
+      ai.queue.resetRunning()
+      ai.queue.kick()
 
       // Step 6: bridge + window.
       registerIpc({ port, dataRoot: paths.dataRoot, version: app.getVersion() })

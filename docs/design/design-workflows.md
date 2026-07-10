@@ -77,36 +77,46 @@ folder removed.
 `needs_review` candidate whose page explains why, with the original one click away (never a dead
 end). Batch drops: each file succeeds/fails independently; failures are listed by name.
 
-## 3. AI analysis & ranking — Planned (P2), design intent
+## 3. AI analysis & ranking — Designed (P2, spec `2026-07-11-phase-2-ai-analysis-ranking-design.md`)
 
-Per-candidate analysis:
+Per-candidate analysis — **explicit, queued, restart-safe**:
 
 ```
-gather context (see design-memory §5: JD + inject + references + values
-                + learned_skills + resume_text — delimited, resume untrusted)
-  → model gateway call (structured output, schema-validated; validate-and-retry per provider)
-  → persist: ai_analysis.json + ai_analyses row
-             (provider, model, prompt version, inputs, reasoning — F3.2)
+boss clicks "Analyse" / "Analyse all new"
+  → enqueue analysis_tasks (dedupe vs queued/running; skip candidates
+    without extracted text — reasons reported, nothing silent)
+  → worker (concurrency 2; interrupted tasks re-queued at boot):
+      gather context (design-memory §5: JD + inject + references + values
+                      + preferences + learned_skills + resume_text — delimited, resume untrusted)
+      → gateway call (zod-validated structured output; per-provider strategy;
+                      one re-ask on invalid output; usage_events recorded)
+      → persist: versioned analyses/analysis_<id>.json + ai_analysis.json (latest)
+                 + ai_analyses row (provider, model, prompt version, input manifest — F3.2)
   → per-conclusion: evidence source + confidence (F3.3); no naked verdicts
   → sensitive info found in input → flagged "must not be used for decisions" (F3.4)
 ```
 
-Ranking run:
+Ranking run — **explicit "Rank now"**:
 
 ```
-per-candidate factor scores (from analyses; each with reason)
-  → total composed IN CODE per the section 5.3 formula (auditable arithmetic)
-  → persist immutable snapshot: rankings + ranking_items
-      {rank, score, reason} per candidate — DB triggers forbid edit/delete
-  → UI shows ranked list; every rank explainable from its snapshot
+latest analysis per candidate (unanalysed candidates listed as excluded, never silent)
+  → total composed IN CODE from factor scores (section 5.3): weights renormalised over
+    the factors present — interview_performance excluded until P3; boss_preference_match
+    only when every included analysis has it
+  → persist immutable snapshot: rankings (criteria = full recipe: factors, weights,
+    exclusions, input analyses) + ranking_items {rank, score, reason}
+  → UI shows ranked list; every rank explainable from its snapshot alone
 ```
 
-**Failure runbook:** provider error / no network / auth lapse → visible "analysis unavailable —
-retry"; **never** a fabricated or cached-as-fresh score. Schema-invalid output → bounded retry
-with stricter prompting → surfaced failure, not a guess.
+**Failure runbook:** provider error / no network / auth lapse → task `failed` with a
+human-readable code, visible "analysis unavailable — retry"; **never** a fabricated or
+cached-as-fresh score. Schema-invalid output → one stricter re-ask → surfaced failure, not a
+guess. App restart with queued work resumes it.
 
 **Guardrails:** analysis is a recommendation — candidate status changes only by boss action
-(invariant 11.1-1); protected attributes never rank (11.1-2); every run snapshots (11.1-5).
+(invariant 11.1-1); protected attributes never rank — ranking composition provably never reads
+`sensitive_flags` (11.1-2); every run snapshots (11.1-5); analysis never runs without an
+explicit boss action (token spend is boss-controlled).
 
 ## 4. Interview loop & memory — Planned (P3), design intent
 

@@ -3,11 +3,14 @@ import { cors } from 'hono/cors'
 import { getSchemaVersion, type DB } from './db'
 import type { JobpinPaths } from './paths'
 import { registerJobRoutes } from './routes'
+import type { AiRuntime } from './ai/runtime'
+import { registerAiRoutes } from './ai/routes'
 
 export interface AppDeps {
   db: DB
   paths: JobpinPaths
   version: string
+  ai?: AiRuntime
 }
 
 /**
@@ -15,7 +18,7 @@ export interface AppDeps {
  * origin (file:// packaged, http://localhost:5173 in dev) and the server
  * itself only ever binds 127.0.0.1.
  */
-export function createApp({ db, paths, version }: AppDeps): Hono {
+export function createApp({ db, paths, version, ai }: AppDeps): Hono {
   const startedAt = Date.now()
   const app = new Hono()
   app.use('*', cors())
@@ -32,5 +35,6 @@ export function createApp({ db, paths, version }: AppDeps): Hono {
   app.get('/version', c => c.json({ app: 'jobpin', version }))
 
   registerJobRoutes(app, { db, paths })
+  if (ai) registerAiRoutes(app, { db, paths, queue: ai.queue })
   return app
 }

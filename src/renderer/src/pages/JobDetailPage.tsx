@@ -6,6 +6,72 @@ import StatusBadge from '../components/StatusBadge'
 interface JobDetail { id: number; name: string; folderPath: string; jd: string | null; createdAt: string }
 interface CandidateSummary { id: number; name: string; status: string; createdAt: string }
 
+interface TaskRow {
+  id: number; candidate_id: number
+  status: 'queued' | 'running' | 'succeeded' | 'failed'
+  error: string | null
+}
+interface AnalysesResp { tasks: TaskRow[]; latestByCandidate: Record<number, number> }
+interface EnqueueResult { enqueued: number[]; skipped: { candidateId: number; reason: string }[] }
+
+interface RankingSummary { id: number; createdAt: string; candidateCount: number }
+interface RankingCriteria { factors: { key: string; base_weight: number; normalised_weight: number }[]; excluded: string[] }
+interface RankingItem { candidateId: number; candidateName: string; rank: number; score: number; reason: string | null }
+interface RankingDetail { id: number; createdAt: string; reason: string | null; criteria: RankingCriteria; items: RankingItem[] }
+
+interface RankExcluded { candidateId: number; reason: string }
+interface RankResult {
+  rankingId: number
+  items: { candidateId: number; rank: number; score: number; reason: string }[]
+  excluded: RankExcluded[]
+}
+
+type AnalysisState =
+  | { kind: 'none' }
+  | { kind: 'queued' | 'running' }
+  | { kind: 'analysed' }
+  | { kind: 'failed'; error: string | null; taskId: number }
+
+function analysisStateFor(candidateId: number, a: AnalysesResp): AnalysisState {
+  const mine = a.tasks.filter(t => t.candidate_id === candidateId)
+  const latest = mine[mine.length - 1] // tasks arrive ordered by id; last is newest
+  if (latest) {
+    if (latest.status === 'succeeded') return { kind: 'analysed' }
+    if (latest.status === 'failed') return { kind: 'failed', error: latest.error, taskId: latest.id }
+    return { kind: latest.status }
+  }
+  return a.latestByCandidate[candidateId] !== undefined ? { kind: 'analysed' } : { kind: 'none' }
+}
+
+function truncate(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, n - 1)}…` : s
+}
+
+function AnalysisCell({ state, onRetry }: { state: AnalysisState; onRetry: (taskId: number) => void }) {
+  switch (state.kind) {
+    case 'none':
+      return <span style={{ color: 'var(--c-text-2)' }}>—</span>
+    case 'analysed':
+      return <StatusBadge status="analysed" />
+    case 'queued':
+    case 'running':
+      return <StatusBadge status={state.kind} tone="warn" />
+    case 'failed':
+      return (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+          <StatusBadge status="failed" tone="danger"
+            label={`failed${state.error ? `: ${truncate(state.error, 40)}` : ''}`} />
+          <button
+            onClick={e => { e.preventDefault(); e.stopPropagation(); onRetry(state.taskId) }}
+            style={{ border: '1px solid var(--c-border)', background: 'var(--c-surface)', fontSize: 'var(--text-xs)',
+                     padding: '2px 8px', borderRadius: 'var(--radius-sm)' }}>
+            Retry
+          </button>
+        </span>
+      )
+  }
+}
+
 export default function JobDetailPage() {
   const { id } = useParams()
   const jobId = Number(id)
@@ -22,11 +88,48 @@ export default function JobDetailPage() {
   const [dragOver, setDragOver] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
 
+  const [analyses, setAnalyses] = useState<AnalysesResp>({ tasks: [], latestByCandidate: {} })
+  const [analyseBusy, setAnalyseBusy] = useState(false)
+  const [analyseResult, setAnalyseResult] = useState<EnqueueResult | null>(null)
+  const [analyseError, setAnalyseError] = useState<string | null>(null)
+  const analysesPollTimer = useRef<number | undefined>(undefined)
+
+  const [rankings, setRankings] = useState<RankingSummary[]>([])
+  const [rankBusy, setRankBusy] = useState(false)
+  const [rankError, setRankError] = useState<string | null>(null)
+  const [rankResult, setRankResult] = useState<RankResult | null>(null)
+  const [expandedRankingId, setExpandedRankingId] = useState<number | null>(null)
+  const [expandedRanking, setExpandedRanking] = useState<RankingDetail | null>(null)
+
   const refresh = useCallback(() => {
     apiJson<JobDetail>(`/jobs/${jobId}`).then(setJob).catch(e => setError(e.message))
     apiJson<CandidateSummary[]>(`/jobs/${jobId}/candidates`).then(setCands).catch(() => {})
   }, [jobId])
   useEffect(refresh, [refresh])
+
+  // Poll the analysis task list every 3s, but only while something is queued/running —
+  // mirrors the Shell health-poll pattern (recursive setTimeout, cleared on unmount).
+  const pollAnalyses = useCallback(async () => {
+    window.clearTimeout(analysesPollTimer.current)
+    try {
+      const a = await apiJson<AnalysesResp>(`/jobs/${jobId}/analyses`)
+      setAnalyses(a)
+      if (a.tasks.some(t => t.status === 'queued' || t.status === 'running')) {
+        analysesPollTimer.current = window.setTimeout(pollAnalyses, 3000)
+      }
+    } catch {
+      // transient poll failure — keep last known state, don't reschedule a tight loop
+    }
+  }, [jobId])
+  useEffect(() => {
+    pollAnalyses()
+    return () => window.clearTimeout(analysesPollTimer.current)
+  }, [pollAnalyses])
+
+  const refreshRankings = useCallback(() => {
+    apiJson<RankingSummary[]>(`/jobs/${jobId}/rankings`).then(setRankings).catch(() => {})
+  }, [jobId])
+  useEffect(refreshRankings, [refreshRankings])
 
   async function run(fn: () => Promise<unknown>) {
     setError(null)
@@ -71,11 +174,73 @@ export default function JobDetailPage() {
     setPasteName(''); setPasteText(''); setPasteOpen(false)
   })
 
+  function candName(candidateId: number): string {
+    return cands.find(c => c.id === candidateId)?.name ?? `candidate ${candidateId}`
+  }
+
+  function candNameOrHash(candidateId: number): string {
+    return cands.find(c => c.id === candidateId)?.name ?? `candidate #${candidateId}`
+  }
+
+  async function analyseAllNew() {
+    setAnalyseError(null); setAnalyseResult(null); setAnalyseBusy(true)
+    try {
+      const res = await apiJson<EnqueueResult>(`/jobs/${jobId}/analyses`, { method: 'POST', body: JSON.stringify({}) })
+      setAnalyseResult(res)
+      pollAnalyses()
+    } catch (e) {
+      setAnalyseError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAnalyseBusy(false)
+    }
+  }
+
+  async function retryTask(taskId: number) {
+    setAnalyseError(null)
+    try {
+      await apiJson(`/analysis-tasks/${taskId}/retry`, { method: 'POST' })
+      pollAnalyses()
+    } catch (e) {
+      setAnalyseError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  async function rankNow() {
+    setRankError(null); setRankResult(null); setRankBusy(true)
+    try {
+      const res = await apiJson<RankResult>(`/jobs/${jobId}/rankings`, { method: 'POST', body: JSON.stringify({}) })
+      setRankResult(res)
+      refreshRankings()
+    } catch (e) {
+      setRankError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRankBusy(false)
+    }
+  }
+
+  async function toggleRanking(rankingId: number) {
+    if (expandedRankingId === rankingId) {
+      setExpandedRankingId(null); setExpandedRanking(null)
+      return
+    }
+    setExpandedRankingId(rankingId); setExpandedRanking(null); setRankError(null)
+    try {
+      const detail = await apiJson<RankingDetail>(`/rankings/${rankingId}`)
+      setExpandedRanking(detail)
+    } catch (e) {
+      setRankError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   if (!job) return <p style={{ color: 'var(--c-text-2)' }}>{error ?? 'Loading…'}</p>
 
   const card: CSSProperties = {
     background: 'var(--c-surface)', border: '1px solid var(--c-border)',
     borderRadius: 'var(--radius)', padding: 'var(--sp-4)', marginBottom: 'var(--sp-5)'
+  }
+  const actionBtn: CSSProperties = {
+    border: '1px solid var(--c-border)', background: 'var(--c-surface)',
+    padding: 'var(--sp-1) var(--sp-3)', borderRadius: 'var(--radius-sm)'
   }
 
   return (
@@ -157,20 +322,106 @@ export default function JobDetailPage() {
       </div>
 
       <div style={card}>
-        <h2 style={{ margin: '0 0 var(--sp-3)', fontSize: 'var(--text-lg)' }}>Candidates ({cands.length})</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-3)' }}>
+          <h2 style={{ margin: 0, fontSize: 'var(--text-lg)' }}>Candidates ({cands.length})</h2>
+          <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+            <button disabled={analyseBusy} onClick={analyseAllNew} style={{ ...actionBtn, opacity: analyseBusy ? 0.5 : 1 }}>
+              {analyseBusy ? 'Analysing…' : 'Analyse all new'}
+            </button>
+            <button disabled={rankBusy} onClick={rankNow} style={{ ...actionBtn, opacity: rankBusy ? 0.5 : 1 }}>
+              {rankBusy ? 'Ranking…' : 'Rank now'}
+            </button>
+          </div>
+        </div>
+
+        {analyseResult && (
+          <p style={{ color: 'var(--c-text-2)', fontSize: 'var(--text-sm)' }}>
+            queued {analyseResult.enqueued.length}, skipped {analyseResult.skipped.length}
+            {analyseResult.skipped.length > 0 &&
+              ` (${analyseResult.skipped.map(s => `${candName(s.candidateId)}: ${s.reason}`).join(' · ')})`}
+          </p>
+        )}
+        {analyseError && <p style={{ color: 'var(--c-danger)', fontSize: 'var(--text-sm)' }}>{analyseError}</p>}
+        {rankError && <p style={{ color: 'var(--c-danger)', fontSize: 'var(--text-sm)' }}>{rankError}</p>}
+
         {cands.length === 0 ? (
           <p style={{ color: 'var(--c-text-2)', margin: 0 }}>None yet — drop some resumes above.</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {cands.map(c => (
-              <Link key={c.id} to={`/candidates/${c.id}`} style={{
+              <div key={c.id} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: 'var(--sp-3) 0', borderTop: '1px solid var(--c-border)',
-                textDecoration: 'none', color: 'inherit'
+                padding: 'var(--sp-3) 0', borderTop: '1px solid var(--c-border)'
               }}>
-                <span>{c.name}</span>
-                <StatusBadge status={c.status} />
-              </Link>
+                <Link to={`/candidates/${c.id}`} style={{ textDecoration: 'none', color: 'inherit', flex: 1 }}>
+                  {c.name}
+                </Link>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
+                  <StatusBadge status={c.status} />
+                  <AnalysisCell state={analysisStateFor(c.id, analyses)} onRetry={retryTask} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={card}>
+        <h2 style={{ margin: '0 0 var(--sp-3)', fontSize: 'var(--text-lg)' }}>Rankings</h2>
+        {rankResult && rankResult.excluded.length > 0 && (
+          <p style={{ color: 'var(--c-text-2)', fontSize: 'var(--text-sm)' }}>
+            Ranked {rankResult.items.length}. Excluded (no analysis): {rankResult.excluded.map(e => candNameOrHash(e.candidateId)).join(', ')}
+          </p>
+        )}
+        {rankings.length === 0 ? (
+          <p style={{ color: 'var(--c-text-2)', margin: 0 }}>No rankings yet — click "Rank now" once some candidates are analysed.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {rankings.map(r => (
+              <div key={r.id} style={{ borderTop: '1px solid var(--c-border)' }}>
+                <button onClick={() => toggleRanking(r.id)} style={{
+                  display: 'flex', width: '100%', justifyContent: 'space-between',
+                  border: 'none', background: 'none', textAlign: 'left', padding: 'var(--sp-3) 0'
+                }}>
+                  <span>#{r.id} · {r.createdAt.slice(0, 10)} · {r.candidateCount} candidates</span>
+                  <span style={{ color: 'var(--c-accent)' }}>{expandedRankingId === r.id ? 'hide' : 'view'}</span>
+                </button>
+                {expandedRankingId === r.id && expandedRanking && expandedRanking.id === r.id && (
+                  <div style={{ paddingBottom: 'var(--sp-3)' }}>
+                    {expandedRanking.reason && (
+                      <p style={{ color: 'var(--c-text-2)', fontSize: 'var(--text-sm)', margin: '0 0 var(--sp-2)' }}>
+                        {expandedRanking.reason}
+                      </p>
+                    )}
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ textAlign: 'left', color: 'var(--c-text-2)', fontSize: 'var(--text-sm)' }}>
+                          <th style={{ padding: 'var(--sp-1) var(--sp-2)' }}>Rank</th>
+                          <th style={{ padding: 'var(--sp-1) var(--sp-2)' }}>Name</th>
+                          <th style={{ padding: 'var(--sp-1) var(--sp-2)' }}>Score</th>
+                          <th style={{ padding: 'var(--sp-1) var(--sp-2)' }}>Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {expandedRanking.items.map(it => (
+                          <tr key={it.candidateId} style={{ borderTop: '1px solid var(--c-border)' }}>
+                            <td style={{ padding: 'var(--sp-2)' }}>{it.rank}</td>
+                            <td style={{ padding: 'var(--sp-2)' }}>
+                              <Link to={`/candidates/${it.candidateId}`}>{it.candidateName}</Link>
+                            </td>
+                            <td style={{ padding: 'var(--sp-2)' }}>{it.score}</td>
+                            <td style={{ padding: 'var(--sp-2)', color: 'var(--c-text-2)' }}>{it.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p style={{ color: 'var(--c-text-2)', fontSize: 'var(--text-sm)', marginBottom: 0 }}>
+                      factors: {expandedRanking.criteria.factors.map(f => `${f.key} ${f.normalised_weight.toFixed(2)}`).join(', ')}
+                      {' · '}excluded: {expandedRanking.criteria.excluded.join(', ')}
+                    </p>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         )}

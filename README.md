@@ -66,3 +66,33 @@ First launch creates `%USERPROFILE%\jobpin-data\` (your data, all local) and
 Note: on Node 22.11 the `dist` script needs the bundled
 `NODE_OPTIONS=--experimental-require-module` (already in the script);
 upgrading to Node ≥ 22.12 makes it unnecessary.
+
+### AI features (Phase 2)
+
+Analysis and ranking call a boss-chosen provider directly from this computer — no vendor
+service sits in between yet (that's a later phase; see `DECISIONS.md`). To enable it, add
+whichever of these keys you have to a local `.env` (repo root, gitignored, never committed):
+
+    OPENAI_API_KEY=...
+    DEEPSEEK_API_KEY=...
+    ANTHROPIC_API_KEY=...
+
+Pick the active provider and model on the **Settings** page — it shows the plan, a
+jurisdiction/data-handling disclosure per provider (confirm before switching), and an
+advisory usage bar (used / allowance; the numbers are dev-stub placeholders, see D-13).
+
+Offline / no-key behaviour: everything except analysis keeps working with no key
+configured or no network — jobs, candidates, extraction, ranking of already-analysed
+candidates, settings. Only the analyse/re-analyse action fails, visibly, with a plain
+auth/network message.
+
+**Cross-provider eval** (dev-only, run manually — never from tests or CI):
+
+    node scripts/ai-eval.mjs          # dry run: prints the call plan, makes no calls
+    node scripts/ai-eval.mjs --yes    # runs 5 synthetic resumes through every provider with a key
+
+It calls each configured provider with the same request shapes as the real adapters,
+validates the JSON shape, prints a provider × resume factor-score matrix, and flags any
+sensitive-vs-scrubbed factor delta greater than 10 points. Each `--yes` run is real,
+billed API traffic — the script prints the exact call count up front and requires `--yes`
+to proceed. Results are written to `docs/superpowers/evals/<date>-phase-2-eval.md`.
