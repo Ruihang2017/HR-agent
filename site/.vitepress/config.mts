@@ -49,6 +49,10 @@ export default defineConfig({
           { text: 'Decisions (index + log)', link: '/DECISIONS' }
         ]
       },
+      {
+        text: 'Design (HOW)',
+        items: itemsFor('docs/design', { first: 'design-architecture.md' })
+      },
       { text: 'Handovers', items: itemsFor('docs/handover', { first: 'README.md' }) },
       { text: 'Meeting minutes', items: itemsFor('docs/meeting_minutes') },
       {

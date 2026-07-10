@@ -1,0 +1,25 @@
+const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
+
+/**
+ * Derive a Windows-safe folder name from a job display name (spec section 2.1).
+ * Unicode is preserved; only illegal characters, reserved device names, and
+ * collisions are handled. The display name in the DB is never altered.
+ */
+export function deriveFolderName(displayName: string, existingFolderNames: string[]): string {
+  let name = displayName
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^[. ]+/, '')
+    .replace(/[. ]+$/, '')
+  if (name.length > 80) name = name.slice(0, 80).replace(/[. ]+$/, '')
+  if (name === '') name = 'job'
+  if (RESERVED.test(name)) name += '_'
+
+  const taken = new Set(existingFolderNames.map(n => n.toLowerCase()))
+  if (!taken.has(name.toLowerCase())) return name
+  for (let i = 2; ; i++) {
+    const candidate = `${name} (${i})`
+    if (!taken.has(candidate.toLowerCase())) return candidate
+  }
+}
