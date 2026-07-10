@@ -1,9 +1,19 @@
 let portPromise: Promise<number> | null = null
 const port = (): Promise<number> => (portPromise ??= window.jobpin.getServerPort())
 
+/** Thrown on any non-2xx response; carries the HTTP status so callers can
+ *  distinguish e.g. "404 not found yet" from a real failure. */
+export class ApiError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
+
 async function handle<T>(res: Response): Promise<T> {
   const body = (await res.json().catch(() => ({}))) as { error?: string }
-  if (!res.ok) throw new Error(body.error ?? `request failed (${res.status})`)
+  if (!res.ok) throw new ApiError(body.error ?? `request failed (${res.status})`, res.status)
   return body as T
 }
 
