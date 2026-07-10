@@ -102,6 +102,24 @@ describe('POST /jobs/:id/analyses + GET /jobs/:id/analyses', () => {
     const res = await app.request('/jobs/999/analyses', json({}))
     expect(res.status).toBe(404)
   })
+
+  it('malformed JSON body -> 400, no tasks created (never falls back to "analyse all new")', async () => {
+    const jobRes = await app.request('/jobs', json({ name: 'Barista', jd: 'Serve coffee' }))
+    const { id: jobId } = await jobRes.json()
+    // A candidate eligible for "analyse all new" is present, so if malformed JSON silently
+    // became `{}` (candidateIds undefined -> analyse all), this candidate would get enqueued.
+    await app.request(`/jobs/${jobId}/candidates`, json({ name: 'Pat', text: 'Ten years of sales experience.' }))
+
+    const res = await app.request(`/jobs/${jobId}/analyses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{not json'
+    })
+    expect(res.status).toBe(400)
+
+    const count = db.prepare('SELECT COUNT(*) AS n FROM analysis_tasks').get() as { n: number }
+    expect(count.n).toBe(0)
+  })
 })
 
 describe('GET /candidates/:id/analysis', () => {

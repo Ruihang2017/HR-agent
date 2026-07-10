@@ -445,6 +445,11 @@ async function main() {
       lines.push(`${provider.name}.${k}: sensitive=${a} scrubbed=${b} delta=${delta}${warn ? '  WARN' : ''}`)
     }
     lines.push(`${provider.name}.sensitive_flags_count: sensitive=${sens.flags} scrubbed=${scrub.flags}`)
+    if (sens.flags === 0) {
+      const w = `${provider.name}: sensitive resume returned zero sensitive_flags (spec 12 expects flags present)`
+      warnings.push(w)
+      lines.push(`  WARN: ${w}`)
+    }
   }
 
   for (const line of lines) console.log(line)

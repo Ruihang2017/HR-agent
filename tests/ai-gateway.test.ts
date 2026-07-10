@@ -92,6 +92,14 @@ describe('gateway', () => {
     const gw = new Gateway({ db: freshDb(), issuer: new DevTokenIssuer({}), fetchFn: (async () => ok(openaiBody('{}'))) as typeof fetch })
     await expect(gw.complete(req)).rejects.toMatchObject({ code: 'auth' })
   })
+  it('transport timeout maps to timeout', async () => {
+    const fetchFn = ((_url: any, init: any) =>
+      new Promise((_res, rej) => {
+        init.signal.addEventListener('abort', () => rej(init.signal.reason))
+      })) as unknown as typeof fetch
+    const gw = new Gateway({ db: freshDb(), issuer, backoffMs: [1, 1], timeoutMs: 10, fetchFn })
+    await expect(gw.complete(req)).rejects.toMatchObject({ code: 'timeout' })
+  })
 })
 
 describe('openai adapter request shape', () => {

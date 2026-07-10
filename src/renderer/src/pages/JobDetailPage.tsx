@@ -17,7 +17,14 @@ interface EnqueueResult { enqueued: number[]; skipped: { candidateId: number; re
 interface RankingSummary { id: number; createdAt: string; candidateCount: number }
 interface RankingCriteria { factors: { key: string; base_weight: number; normalised_weight: number }[]; excluded: string[] }
 interface RankingItem { candidateId: number; candidateName: string; rank: number; score: number; reason: string | null }
-interface RankingDetail { id: number; createdAt: string; criteria: RankingCriteria; items: RankingItem[] }
+interface RankingDetail { id: number; createdAt: string; reason: string | null; criteria: RankingCriteria; items: RankingItem[] }
+
+interface RankExcluded { candidateId: number; reason: string }
+interface RankResult {
+  rankingId: number
+  items: { candidateId: number; rank: number; score: number; reason: string }[]
+  excluded: RankExcluded[]
+}
 
 type AnalysisState =
   | { kind: 'none' }
@@ -90,6 +97,7 @@ export default function JobDetailPage() {
   const [rankings, setRankings] = useState<RankingSummary[]>([])
   const [rankBusy, setRankBusy] = useState(false)
   const [rankError, setRankError] = useState<string | null>(null)
+  const [rankResult, setRankResult] = useState<RankResult | null>(null)
   const [expandedRankingId, setExpandedRankingId] = useState<number | null>(null)
   const [expandedRanking, setExpandedRanking] = useState<RankingDetail | null>(null)
 
@@ -170,6 +178,10 @@ export default function JobDetailPage() {
     return cands.find(c => c.id === candidateId)?.name ?? `candidate ${candidateId}`
   }
 
+  function candNameOrHash(candidateId: number): string {
+    return cands.find(c => c.id === candidateId)?.name ?? `candidate #${candidateId}`
+  }
+
   async function analyseAllNew() {
     setAnalyseError(null); setAnalyseResult(null); setAnalyseBusy(true)
     try {
@@ -194,9 +206,10 @@ export default function JobDetailPage() {
   }
 
   async function rankNow() {
-    setRankError(null); setRankBusy(true)
+    setRankError(null); setRankResult(null); setRankBusy(true)
     try {
-      await apiJson(`/jobs/${jobId}/rankings`, { method: 'POST', body: JSON.stringify({}) })
+      const res = await apiJson<RankResult>(`/jobs/${jobId}/rankings`, { method: 'POST', body: JSON.stringify({}) })
+      setRankResult(res)
       refreshRankings()
     } catch (e) {
       setRankError(e instanceof Error ? e.message : String(e))
@@ -355,6 +368,11 @@ export default function JobDetailPage() {
 
       <div style={card}>
         <h2 style={{ margin: '0 0 var(--sp-3)', fontSize: 'var(--text-lg)' }}>Rankings</h2>
+        {rankResult && rankResult.excluded.length > 0 && (
+          <p style={{ color: 'var(--c-text-2)', fontSize: 'var(--text-sm)' }}>
+            Ranked {rankResult.items.length}. Excluded (no analysis): {rankResult.excluded.map(e => candNameOrHash(e.candidateId)).join(', ')}
+          </p>
+        )}
         {rankings.length === 0 ? (
           <p style={{ color: 'var(--c-text-2)', margin: 0 }}>No rankings yet — click "Rank now" once some candidates are analysed.</p>
         ) : (
@@ -370,6 +388,11 @@ export default function JobDetailPage() {
                 </button>
                 {expandedRankingId === r.id && expandedRanking && expandedRanking.id === r.id && (
                   <div style={{ paddingBottom: 'var(--sp-3)' }}>
+                    {expandedRanking.reason && (
+                      <p style={{ color: 'var(--c-text-2)', fontSize: 'var(--text-sm)', margin: '0 0 var(--sp-2)' }}>
+                        {expandedRanking.reason}
+                      </p>
+                    )}
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead>
                         <tr style={{ textAlign: 'left', color: 'var(--c-text-2)', fontSize: 'var(--text-sm)' }}>

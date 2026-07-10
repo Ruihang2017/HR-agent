@@ -194,7 +194,11 @@ describe('runRanking / listRankings / getRanking', () => {
 
     const list = listRankings(db, jobId)
     expect(list).toHaveLength(2)
-    expect(list.map(r => r.id).sort((x, y) => x - y)).toEqual([first.rankingId, second.rankingId].sort((x, y) => x - y))
+    // Newest-first ordering — compare without sorting first.
+    expect(list.map(r => r.id)).toEqual([second.rankingId, first.rankingId])
+    // candidateCount must equal each snapshot's item count (1 candidate, Alice, in both runs).
+    expect(list[0].candidateCount).toBe(1)
+    expect(list[1].candidateCount).toBe(1)
 
     const firstAgain = getRanking(db, first.rankingId)
     expect(firstAgain.items).toHaveLength(1)

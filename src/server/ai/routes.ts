@@ -1,7 +1,7 @@
 import type { Hono } from 'hono'
 import type { DB } from '../db'
 import type { JobpinPaths } from '../paths'
-import { NotFoundError } from '../errors'
+import { NotFoundError, ValidationError } from '../errors'
 import type { AnalysisQueue } from './queue'
 import { CATALOG, disclosureFor, type Provider } from './catalog'
 import { getPlan } from './subscription'
@@ -15,7 +15,15 @@ export function registerAiRoutes(app: Hono, deps: { db: DB; paths: JobpinPaths; 
 
   app.post('/jobs/:id/analyses', async c => {
     const jobId = Number(c.req.param('id'))
-    const body = (await c.req.json().catch(() => ({}))) as { candidateIds?: number[] }
+    const raw = await c.req.text()
+    let body: { candidateIds?: number[] } = {}
+    if (raw.trim().length > 0) {
+      try {
+        body = JSON.parse(raw) as { candidateIds?: number[] }
+      } catch {
+        throw new ValidationError('request body must be valid JSON')
+      }
+    }
     return c.json(queue.enqueueAnalyses(jobId, body.candidateIds), 202)
   })
 

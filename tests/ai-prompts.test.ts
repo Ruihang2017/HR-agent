@@ -12,9 +12,10 @@ describe('analysis prompts', () => {
   })
   it('system prompt carries the F8.5 constraints verbatim', () => {
     const { system } = buildAnalysisPrompt(base)
-    expect(system).toContain('You are a hiring assistance system, not the final decision maker.')
-    expect(system).toContain('must not be used for decisions')
-    expect(system).toContain('evidence source and confidence')
+    // Copied verbatim from PRD.md section F8.5 (the client-minutes hard constraints paragraph).
+    const F8_5_PARAGRAPH =
+      'You are a hiring assistance system, not the final decision maker. You may only analyse based on job-relevant evidence. You must not use protected attributes or job-irrelevant personal characteristics in ranking. If the input contains sensitive information, you may only mark it "must not be used for decisions." Every conclusion must include its evidence source and confidence.'
+    expect(system).toContain(F8_5_PARAGRAPH)
   })
   it('resume is delimited and labelled untrusted; never in the system prompt', () => {
     const { system, user } = buildAnalysisPrompt(base)
