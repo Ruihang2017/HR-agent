@@ -12,7 +12,7 @@ PRD.md                     product spec (WHAT) — read this first; status in it
 CONTEXT.md                 glossary — one canonical term per concept
 DECISIONS.md               decision index (D-1…) + dated log (WHY)
 CLAUDE.md                  working agreement for contributors, human or AI (process rules)
-src/                       the app: main / preload / renderer / server (Electron + TS)
+src/                       the app: main / preload / renderer (routed UI) / server (jobs, candidates, extraction)
 tests/                     Vitest suite (run via `npm test` only — see Run it)
 templates/                 developer-supplied, lawyer-reviewed AU template content
 docs/
