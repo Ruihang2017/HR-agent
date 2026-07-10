@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Working name** | Jobpin (local hiring assistant) |
-| **Version** | 2.12 — Canonical |
+| **Version** | 2.13 — Canonical |
 | **Date** | 10 July 2026 |
 | **Owner** | Horace Hou |
 | **Provenance** | Derived in full from the client technical spec (2026-07-09 meeting), preserved verbatim at `docs/meeting_minutes/2026-07-09-jobpin-technical-spec.md` (D-8). **This PRD is the single source of truth**; new client input arrives as new minutes and is applied here by explicit update. |
-| **Status** | Phases 0–1 complete (2026-07-10); Phase 2 (AI analysis & ranking) is next |
+| **Status** | Phases 0–2 complete (2026-07-11); Phase 3 (interview loop & memory) is next |
 
 **Version history**
 | Version | Date | Change |
@@ -26,6 +26,7 @@
 | 2.10 | 2026-07-10 | Documentation-system adoption (D-25): section 8.1 field detail and the Phase 0 technical approach now **point** to the Phase 0 design spec instead of restating it (fixes schema drift — `rankings.criteria` was missing here); section 9 slimmed to WHAT; stale "no repository code" line removed; glossary restored as standalone `CONTEXT.md`. |
 | 2.11 | 2026-07-10 | Phase 1 complete: status flipped; section 10 Phase 1 rewritten as delivered-with-pointers (spec / plan / handover; implementation decisions D-26, D-27). |
 | 2.12 | 2026-07-10 | Technical design layer added as companion docs (D-28): `docs/design/` — architecture · data & memory · workflows — the cross-phase HOW overview for technical reviewers; PRD remains the WHAT authority. |
+| 2.13 | 2026-07-11 | Phase 2 complete: status flipped; section 10 Phase 2 rewritten as delivered-with-pointers (spec / plan / handover / eval; decisions D-29…D-32). |
 
 ## How to use this document
 
@@ -297,14 +298,23 @@ acceptance criteria verified, including the owner's manual walk.
 `docs/superpowers/plans/2026-07-10-phase-1-job-workspace.md` · handover
 `docs/handover/2026-07-10-phase-1-job-workspace.md`. Decisions: D-26, D-27.
 
-### Phase 2 — AI analysis & ranking *(tasks 7–8)*
+### Phase 2 — AI analysis & ranking *(tasks 7–8)* — ✅ complete (2026-07-11)
 
-- **Objective:** the product's core intelligence: per-candidate analysis (F3) and snapshot-persisted ranking (F4), built on a provider-agnostic model gateway (D-9).
-- **Scope:** the model-gateway module with provider adapters (OpenAI, DeepSeek, Anthropic Claude); model selection from the plan's catalog (D-13: Free / Pro tiers) + subscription activation in settings (`settings` table; token-issuance client per D-12, stubbed with dev credentials until the vendor service exists — a Phase 2 design item); the provider-risk disclosure at model selection (D-11); candidate analysis producing all F3.1 dimensions with evidence + confidence (F3.3) into `ai_analysis.json` + `ai_analyses`; sensitive-info flagging (F3.4); system-prompt hard constraints (F8.5); ranked list + immutable snapshots (F4.1–F4.3); section 5.3 scoring composition. **Out:** interview flows; boss-preference *learning* (Phase 3 — but `boss_preferences.json` may be read if present).
-- **Technical approach:** the gateway is the single call site — every call logged into `ai_analyses` with provider, model, prompt version, inputs, and reasoning (F3.2); structured JSON outputs validated against schemas, with a per-provider structured-output strategy (native JSON/tool modes where available, validate-and-retry otherwise); ranking math in code — the LLM contributes component judgments and reasons, code composes the total (auditable arithmetic); no-network / auth-failure states degrade to a visible "analysis unavailable — retry" (section 11.2), never a fabricated score.
-- **Dependencies:** Phase 1. Tiers/catalog are set (D-13); token-issuance mechanics are designed within this phase (see risks); the vendor service can be stubbed with dev credentials and does not gate the gateway build.
-- **Acceptance criteria:** import 5 resumes → each gets a complete analysis (all F3.1 dimensions, each with evidence + confidence); **switching provider in settings re-routes the next analysis with zero feature-code changes**, and the analysis record shows the new provider + model; model selection shows the provider-risk disclosure (D-11); a resume containing age/marital status yields a "must not be used for decisions" flag and those attributes demonstrably don't move the score; ranking produces a snapshot row-for-row matching the section 5.3 snapshot shape; re-running ranking appends a new snapshot, never mutates the old; with the network unplugged, analysis shows the unavailable state and everything else keeps working.
-- **Risks:** cross-provider output variance — the same prompts must yield schema-valid, comparable analyses on all three providers (a small cross-provider eval set is part of this phase); usage/quota visibility for the boss (allowances per D-13); token-issuance design items: per-provider key/budget APIs (DeepSeek's controls are the thinnest — confirm, or proxy DeepSeek only), key TTL/rotation, revocation on cancel, offline grace period, free-tier abuse controls, at-cap behaviour, exact per-tier allowances.
+Delivered: per-candidate analysis with evidence + confidence on every F3.1 dimension and
+sensitive-info flag-and-exclude (F3.4), through a provider-agnostic gateway (OpenAI / DeepSeek /
+Anthropic — switching provider is a settings change, zero feature-code changes) with a
+restart-safe analysis queue; explicit "Rank now" runs persisting immutable, criteria-recorded
+snapshots composed by auditable arithmetic in code (F4); model selection with the D-11 risk
+disclosure; subscription stubbed behind a token-issuer seam with advisory usage metering (D-31);
+a cross-provider eval script. All acceptance criteria verified live on all three providers,
+including the owner's manual walk and eval run.
+**How it was built lives elsewhere (point, don't restate):** design spec
+`docs/superpowers/specs/2026-07-11-phase-2-ai-analysis-ranking-design.md` · implementation plan
+`docs/superpowers/plans/2026-07-11-phase-2-ai-analysis-ranking.md` · handover
+`docs/handover/2026-07-11-phase-2-ai-analysis-ranking.md` · eval results
+`docs/superpowers/evals/`. Decisions: D-29…D-32. Vendor-service mechanics (token TTL/rotation,
+at-cap behaviour, real allowances, DeepSeek metering) remain design items for the vendor
+subscription service, recorded with D-31.
 
 ### Phase 3 — Interview loop & memory *(tasks 9–11)*
 

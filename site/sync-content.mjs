@@ -27,7 +27,8 @@ const ALLOW = [
   ...globMd('docs/handover'),
   ...globMd('docs/meeting_minutes'),
   ...globMd('docs/superpowers/specs'),
-  ...globMd('docs/superpowers/plans')
+  ...globMd('docs/superpowers/plans'),
+  ...globMd('docs/superpowers/evals')
 ]
 
 fs.rmSync(out, { recursive: true, force: true })
