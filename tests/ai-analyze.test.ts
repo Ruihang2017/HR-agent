@@ -137,6 +137,37 @@ describe('analyzeCandidate', () => {
     expect(req.user).toContain('=== BOSS PREFERENCES ===')
   })
 
+  it('treats the scaffold-default empty boss_preferences stub as not configured', async () => {
+    // ensureScaffold seeds company/boss_preferences.json as '{}\n' - leave it untouched.
+    expect(fs.readFileSync(paths.bossPreferencesFile, 'utf8')).toBe('{}\n')
+    const c = await addCandidateFromText({ db, paths }, jobId, 'Pat', 'Ten years of sales.')
+    const { analysisId } = await analyzeCandidate(deps, c.id)
+    const req = captured[captured.length - 1]
+    expect(req.user).not.toContain('=== BOSS PREFERENCES ===')
+    const row = db.prepare('SELECT input_manifest FROM ai_analyses WHERE id = ?').get(analysisId) as {
+      input_manifest: string
+    }
+    const kinds = (JSON.parse(row.input_manifest) as { kind: string }[]).map(m => m.kind)
+    expect(kinds).not.toContain('preferences')
+  })
+
+  it('includes real boss preferences content in the prompt and the manifest', async () => {
+    fs.writeFileSync(paths.bossPreferencesFile, '{"teamwork":"high"}', 'utf8')
+    const c = await addCandidateFromText({ db, paths }, jobId, 'Pat', 'Ten years of sales.')
+    const { analysisId } = await analyzeCandidate(deps, c.id)
+    const req = captured[captured.length - 1]
+    expect(req.user).toContain('=== BOSS PREFERENCES ===')
+    expect(req.user).toContain('{"teamwork":"high"}')
+    const row = db.prepare('SELECT input_manifest FROM ai_analyses WHERE id = ?').get(analysisId) as {
+      input_manifest: string
+    }
+    const entry = (JSON.parse(row.input_manifest) as { kind: string; path: string; chars: number }[])
+      .find(m => m.kind === 'preferences')
+    expect(entry).toBeDefined()
+    expect(entry!.path).toBe('company/boss_preferences.json')
+    expect(entry!.chars).toBeGreaterThan(0)
+  })
+
   it('rejects with ValidationError when the candidate has no extracted text', async () => {
     const c = await addCandidateFromFile({ db, paths }, jobId, 'corrupt.pdf', read('corrupt.pdf'))
     expect(c.status).toBe('needs_review')

@@ -38,6 +38,20 @@ export async function analyzeCandidate(deps: AnalyzeDeps, candidateId: number): 
     manifest.push({ kind, path: rel, chars: text.length })
     return text
   }
+  // The scaffold seeds boss_preferences.json as an empty stub; an empty JSON
+  // object means "not configured" and must not become a ranking factor.
+  const readPreferences = (): string | undefined => {
+    const rel = 'company/boss_preferences.json'
+    if (!existsSync(abs(rel))) return undefined
+    const text = readFileSync(abs(rel), 'utf8')
+    if (!text.trim()) return undefined
+    try {
+      const parsed = JSON.parse(text)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Object.keys(parsed).length === 0) return undefined
+    } catch { /* not JSON - treat as boss-authored freetext, include it */ }
+    manifest.push({ kind: 'preferences', path: rel, chars: text.length })
+    return text
+  }
   const materials: AnalysisMaterials = {
     jobName: job.name,
     candidateName: cand.name,
@@ -45,7 +59,7 @@ export async function analyzeCandidate(deps: AnalyzeDeps, candidateId: number): 
     resumeText: readRel('resume', doc.extracted_text_path) ?? '',
     inject: readRel('inject', job.inject_path),
     values: readRel('values', 'company/values.md'),
-    bossPreferences: readRel('preferences', 'company/boss_preferences.json'),
+    bossPreferences: readPreferences(),
     learnedSkills: readRel('learned_skills', `${job.folder_path}/learned_skills.md`)
   }
   const refsDir = `${job.folder_path}/references`
