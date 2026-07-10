@@ -172,7 +172,16 @@ export function renameJob(deps: JobsDeps, id: number, newName: string): JobDetai
       }
     })()
   } catch (e) {
-    renameSyncWithRetry(newAbs, oldAbs) // compensate: put the folder back
+    try {
+      renameSyncWithRetry(newAbs, oldAbs) // compensate: put the folder back
+    } catch (compErr) {
+      // Double failure: DB rolled back but the folder is still at the new name.
+      // Surface the ROOT CAUSE (the DB error); log the divergence for manual repair.
+      console.error(
+        `rename compensation failed: folder left at "${newFolderRel}" while DB points at "${oldFolderRel}"`,
+        compErr
+      )
+    }
     throw e
   }
   return getJob(deps, id)

@@ -19,6 +19,8 @@ export async function extractText(bytes: Uint8Array, ext: string): Promise<Extra
       return { text: Buffer.from(bytes).toString('utf8') }
     }
     if (e === 'pdf') {
+      // Defensive copy is load-bearing: pdf.js may detach the buffer it is given,
+      // and callers persist these same bytes AFTER extraction. Do not "simplify".
       const pdf = await getDocumentProxy(new Uint8Array(bytes))
       const { text } = await unpdfExtractText(pdf, { mergePages: true })
       if (!text || text.trim() === '') return { error: 'no extractable text (scanned document?)' }
