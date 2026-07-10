@@ -25,6 +25,7 @@ The pre-reset product ("Shortlist") is preserved in git history at `db5e511`.
 | [`DECISIONS.md`](DECISIONS.md) | Decision index (D-1…) + dated log of major decisions and rationale |
 | [`docs/handover/`](docs/handover/) | One handover per major implementation or phase |
 | [`CLAUDE.md`](CLAUDE.md) | Working agreement for contributors (human or AI) |
+| [`site/`](site/) | Docs portal (VitePress) — publishes PRD/decisions/handovers/minutes to Netlify with a feedback form; auto-deploys on push to `main` |
 
 ## Planned shape (PRD section 9)
 

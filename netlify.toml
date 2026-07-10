@@ -1,0 +1,7 @@
+# Jobpin docs portal - Netlify build config.
+# base=site keeps the docs build fully isolated from the Electron app
+# (no electron-rebuild postinstall runs on Netlify).
+[build]
+  base = "site"
+  command = "npm run build"
+  publish = ".vitepress/dist"
