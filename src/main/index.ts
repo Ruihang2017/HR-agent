@@ -53,7 +53,7 @@ if (!gotLock) {
       runMigrations(db, migrations)
 
       // Step 5: start the localhost server on an OS-assigned port.
-      const honoApp = createApp({ db, dataRoot: paths.dataRoot, version: app.getVersion() })
+      const honoApp = createApp({ db, paths, version: app.getVersion() })
       const { port } = await startServer(honoApp)
 
       // Step 6: bridge + window.

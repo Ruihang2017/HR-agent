@@ -1,19 +1,21 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { getSchemaVersion, type DB } from './db'
+import type { JobpinPaths } from './paths'
+import { registerJobRoutes } from './routes'
 
 export interface AppDeps {
   db: DB
-  dataRoot: string
+  paths: JobpinPaths
   version: string
 }
 
 /**
  * The local API. CORS is open because the renderer runs on a different
  * origin (file:// packaged, http://localhost:5173 in dev) and the server
- * itself only ever binds 127.0.0.1 (spec section 3).
+ * itself only ever binds 127.0.0.1.
  */
-export function createApp({ db, dataRoot, version }: AppDeps): Hono {
+export function createApp({ db, paths, version }: AppDeps): Hono {
   const startedAt = Date.now()
   const app = new Hono()
   app.use('*', cors())
@@ -22,12 +24,13 @@ export function createApp({ db, dataRoot, version }: AppDeps): Hono {
     c.json({
       status: 'ok',
       schemaVersion: getSchemaVersion(db),
-      dataDir: dataRoot,
+      dataDir: paths.dataRoot,
       uptimeSeconds: Math.round((Date.now() - startedAt) / 1000)
     })
   )
 
   app.get('/version', c => c.json({ app: 'jobpin', version }))
 
+  registerJobRoutes(app, { db, paths })
   return app
 }
