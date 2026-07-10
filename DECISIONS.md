@@ -41,8 +41,33 @@ also have a dated entry below.
 | **D-20** | 2026-07-09 | **PRD v2.7 cleanup:** decision log consolidated into this file (this index is the canonical D-registry); PRD Open-questions and Glossary sections removed (all resolved); "§" symbols replaced with plain section references; PRD sections renumbered (Implementation plan → 10, Cross-cutting → 11); DB key fields rendered as a code block. | Owner directive — one home per kind of content; "§" was unreadable to the team; duplicated decision content in two files invites drift. |
 | **D-21** | 2026-07-10 | **`jobpin-data/` lives in the user's home folder** (e.g. `C:\Users\<boss>\jobpin-data`), with the SQLite DB inside it (`jobpin-data/jobpin.db`) — one folder is the complete data set. | Visible (file-first transparency) yet outside OneDrive's default sync scope — a Documents location would silently sync candidate PII to the cloud on many Windows 11 machines, breaking the local-only invariant; one folder makes backup/restore (F8.4) trivial. Rejected: Documents (OneDrive trap), AppData (hidden — kills transparency), first-run picker (unneeded UX for MVP). |
 | **D-22** | 2026-07-10 | **Phase 0 foundation stack (Approach A):** single-package TypeScript project; electron-vite (dev/build) + electron-builder (NSIS Windows installer); **Hono** HTTP server hosted in the Electron main process, bound to `127.0.0.1:0` (OS-assigned port, handed to the renderer via preload IPC); **better-sqlite3**; numbered SQL-file migrations tracked in a `migrations` table; single-instance lock. | Shortest path to Phase 0 acceptance with industry-standard parts and the best dev loop; nothing blocks later upgrades (utilityProcess isolation, an ORM) without rearchitecting. Rejected: Electron Forge all-in-one (rougher Vite integration, clunkier Squirrel installer); utilityProcess + Fastify + Drizzle now (more moving parts than the skeleton needs). |
+| **D-23** | 2026-07-10 | **Native-module rebuilds via @electron/rebuild** — `postinstall: electron-rebuild -f -w better-sqlite3` keeps `node_modules` on the Electron ABI; all tests run through `ELECTRON_RUN_AS_NODE=1 electron` (`npm test`), never `npx vitest`. Standing choice, kept after any Node upgrade. | `electron-builder install-app-deps` (the plan's original hook) crashes on Node < 22.12 (needs default `require(esm)`); @electron/rebuild is narrower, faster, and tests then exercise the exact native binary that ships. |
+| **D-24** | 2026-07-10 | **Temporary workaround:** the `dist` script carries `NODE_OPTIONS=--experimental-require-module` so electron-builder packages on the dev machine's Node 22.11. **Remove once the machine runs Node ≥ 22.12** (flag becomes default behaviour); README notes it. | Unblocks Windows packaging today without forcing an immediate machine-level Node upgrade. |
 
 ---
+
+### 2026-07-10 — Phase 0 toolchain: @electron/rebuild postinstall (D-23) + Node 22.11 packaging flag (D-24)
+**Decision:** Two related implementation decisions from Phase 0 execution:
+1. **D-23 (standing):** native-module rebuilds run via `@electron/rebuild`
+   (`postinstall: electron-rebuild -f -w better-sqlite3`), keeping `node_modules` on the
+   **Electron ABI** at all times; consequently every test run goes through
+   `ELECTRON_RUN_AS_NODE=1 electron` (`npm test`) — running `npx vitest` directly loads the
+   wrong ABI and crashes. This replaces the plan's `electron-builder install-app-deps` hook and
+   stays even after a Node upgrade.
+2. **D-24 (temporary):** the `dist` script carries `NODE_OPTIONS=--experimental-require-module`
+   so electron-builder itself runs on the dev machine's Node 22.11. Delete the flag (and the
+   README note) once the machine is on Node ≥ 22.12, where `require(esm)` is default.
+**Context:** During Phase 0 Task 1, `electron-builder install-app-deps` crashed with
+`ERR_REQUIRE_ESM` on Node 22.11.0 — electron-builder's dependency chain requires `require(esm)`,
+default only from Node 22.12. `@electron/rebuild` worked despite its engine warning; the
+packaging CLI needed the experimental flag.
+**Alternatives:** Upgrading Node immediately (deferred — machine-level change, not needed to ship
+Phase 0; still recommended); pinning an older electron-builder (rejected — chasing version
+archaeology instead of a one-line flag).
+**Rationale:** Ship Phase 0 on the machine as it is; keep the temporary part clearly labelled
+with its removal condition.
+**Status:** Active. D-23 standing; D-24 active-temporary (remove at Node ≥ 22.12). Recorded in
+the Phase 0 handover.
 
 ### 2026-07-10 — Phase 0: data location in the user's home folder (D-21)
 **Decision:** `jobpin-data/` is created directly in the user's home folder
