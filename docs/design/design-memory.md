@@ -54,8 +54,9 @@ The full tree is normative in PRD section 8.2; the shape:
 
 - **13 tables** (P0 migration 0001): `jobs, candidates, candidate_documents, interviews,
   interview_questions, interview_answers, ai_analyses, rankings, ranking_items, emails,
-  memory_events, documents, settings`. Field-level truth lives in
-  `src/server/migrations/` and the Phase 0 spec — deliberately not restated here.
+  memory_events, documents, settings`; migration 0002 (P2) adds `analysis_tasks` (the analysis
+  queue) and `usage_events` (advisory token metering). Field-level truth lives in
+  `src/server/migrations/` and the phase specs — deliberately not restated here.
 - **Relative forward-slash paths** in every `*_path` column; the folder is relocatable.
 - **Folder naming** is derived, unicode-preserving, Windows-safe (illegal chars stripped,
   reserved device names guarded, 80-char cap, case-insensitive collision suffixing). The display

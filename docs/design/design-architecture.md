@@ -83,13 +83,16 @@ These rules are enforced by review and tests; breaking one is a defect, not a st
 Principle: **honesty under uncertainty** (PRD section 7). Failures are visible states the boss can
 act on, never silent defaults.
 
-## 4. AI layer — Planned (P2), design intent
+## 4. AI layer — Designed (P2, spec `2026-07-11-phase-2-ai-analysis-ranking-design.md`)
 
-The part most worth reviewing before build:
-
-- **One gateway, no leaks.** Every model call goes through one gateway module; provider SDKs
-  (OpenAI / DeepSeek / Anthropic) exist only behind its adapter interface. Feature code composes
-  *prompts and schemas*, never provider calls. Switching models must touch zero feature code (D-9).
+- **One gateway, no leaks — and no SDKs at all.** Every model call goes through one gateway
+  module with hand-rolled raw-HTTP adapters (OpenAI / DeepSeek / Anthropic); provider SDK types
+  cannot leak because none exist. Feature code composes *prompts and schemas*, never provider
+  calls. Switching models must touch zero feature code (D-9).
+- **Queue-first execution.** Analyses run through a restart-safe DB-backed queue
+  (`analysis_tasks`, worker concurrency 2, boot recovery re-queues interrupted work). Analysis
+  and ranking are **explicit boss actions** ("Analyse", "Analyse all new", "Rank now") — never
+  automatic token spend.
 - **Structured output as the contract.** Every LLM node returns schema-validated JSON (+ evidence
   and confidence per conclusion, F3.3). Per-provider strategy: native JSON/tool modes where
   available, validate-and-retry otherwise. Nothing free-text ever writes to the DB.
@@ -101,7 +104,9 @@ The part most worth reviewing before build:
 - **Credentials via token issuance (D-12):** the subscription client exchanges the boss's plan
   for scoped, budget-capped, short-lived provider keys; the app then calls providers **directly**
   — candidate content never transits vendor infrastructure. Vendor proxy remains a documented
-  free-tier fallback only.
+  free-tier fallback only. *Until the vendor service exists*, a `TokenIssuer` interface ships
+  with a dev-stub implementation (env-supplied keys, fake Pro plan) plus **advisory local
+  metering** (`usage_events` vs the D-13 allowances — no enforcement).
 - **Cost tiering:** cheap models for mechanical extraction/classification; the upgraded tier for
   analysis and ranking judgment. Each LLM node is independently budgetable and testable.
 - **Untrusted input discipline:** resume and email content is delimited context, never merged
@@ -145,13 +150,17 @@ suites. 71 tests / 12 files as of Phase 1.
 - **The product as a whole:** never sends email (D-15); never auto-rejects or auto-decides;
   never stores hiring data in any cloud.
 
-## 8. Open questions (Phase 2 design items)
+## 8. Open questions
+
+Settled by the Phase 2 design (2026-07-11): structured-output strategy per provider (OpenAI
+`json_schema` · DeepSeek `json_object` + validate-and-retry · Anthropic forced tool-use);
+gateway placement (in-main, `utilityProcess` still adoptable later). Remaining — all owned by
+the future **vendor subscription service** design:
 
 | # | Question |
 |---|---|
 | 1 | Token-issuance mechanics: key TTL, rotation cadence, revocation on cancel, per-key budget caps |
 | 2 | DeepSeek's thin budget/usage APIs — confirm controls or proxy DeepSeek only |
 | 3 | Offline grace period for subscription validation (how long does AI keep working without re-auth?) |
-| 4 | At-cap behaviour: hard stop vs upgrade prompt (D-13 deferred) |
-| 5 | Per-provider structured-output strategy details (native JSON/tool modes vs validate-and-retry) |
-| 6 | Gateway process placement: in-main vs `utilityProcess` isolation (adoptable later without rearchitecting, per D-22) |
+| 4 | At-cap behaviour: hard stop vs upgrade prompt (D-13 deferred; Phase 2 metering is advisory-only) |
+| 5 | Real per-tier allowances (Phase 2 ships dev-stub numbers) |
