@@ -23,6 +23,7 @@ const ALLOW = [
   'CONTEXT.md',
   'DECISIONS.md',
   'docs/phase0-install-checklist.md',
+  ...globMd('docs/design'),
   ...globMd('docs/handover'),
   ...globMd('docs/meeting_minutes'),
   ...globMd('docs/superpowers/specs'),

@@ -16,6 +16,7 @@ src/                       the app: main / preload / renderer (routed UI) / serv
 tests/                     Vitest suite (run via `npm test` only — see Run it)
 templates/                 developer-supplied, lawyer-reviewed AU template content
 docs/
+  design/                  technical design layer (HOW overview): architecture · data & memory · workflows
   handover/                one handover per phase / major unit of work
   meeting_minutes/         archived client meeting outcomes (verbatim, superseded by PRD)
   superpowers/specs/       per-phase design docs (HOW)
@@ -32,7 +33,8 @@ site/                      docs portal (VitePress) — auto-deploys to Netlify o
 | [`PRD.md`](PRD.md) | Product spec — the source of truth | **First**, and before any product change |
 | [`CONTEXT.md`](CONTEXT.md) | Glossary | Any time a term is unclear |
 | [`DECISIONS.md`](DECISIONS.md) | Decision registry: index D-1… + dated entries | "Why is it this way?" |
-| [`docs/superpowers/specs/`](docs/superpowers/specs/) | Design docs (HOW) | Building or reviewing a specific part |
+| [`docs/design/`](docs/design/) | Technical design overview (HOW): architecture, data & memory, workflows | Reviewing the approach; orienting before any build |
+| [`docs/superpowers/specs/`](docs/superpowers/specs/) | Per-phase design specs (detailed HOW) | Building or reviewing a specific part |
 | [`docs/handover/`](docs/handover/) | Phase handovers | Picking up work mid-stream |
 | [`docs/meeting_minutes/`](docs/meeting_minutes/) | Client input, archived verbatim | Tracing a requirement to its origin |
 | [`CLAUDE.md`](CLAUDE.md) | Process rules / working agreement | Before contributing |
@@ -40,7 +42,8 @@ site/                      docs portal (VitePress) — auto-deploys to Netlify o
 ## Reading paths by role
 
 - **Product / client:** `PRD.md` → the docs portal (same content, searchable, with a feedback form)
-- **Engineering:** `PRD.md` sections 8–11 → the relevant design spec in `docs/superpowers/specs/` → `DECISIONS.md` for any "why"
+- **Technical reviewer:** `PRD.md` → `docs/design/` (architecture → memory → workflows) → `DECISIONS.md` for any "why"
+- **Engineering:** `PRD.md` sections 8–11 → `docs/design/` → the relevant phase spec in `docs/superpowers/specs/` → `DECISIONS.md`
 - **AI collaborator (new session):** `CLAUDE.md` → `PRD.md` → `CONTEXT.md` → latest handover in `docs/handover/`
 
 **Decision registry:** the index table at the top of [`DECISIONS.md`](DECISIONS.md).
