@@ -1,0 +1,15 @@
+appId: com.jobpin.desktop
+productName: Jobpin
+directories:
+  output: dist
+  buildResources: resources
+files:
+  - out/**
+asarUnpack:
+  - "**/node_modules/better-sqlite3/**"
+win:
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

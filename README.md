@@ -1,4 +1,4 @@
-# Jobpin — Local-First Hiring Workbench (pre-implementation)
+# Jobpin — Local-First Hiring Workbench
 
 A boss-only hiring assistant that runs on the boss's own computer:
 Electron desktop app + embedded Node.js local server + SQLite + local files.
@@ -10,10 +10,10 @@ resumes never transit vendor servers, and all hiring data stays local. One
 role (the boss). The AI analyses and ranks candidates with evidence and
 confidence; the boss makes every decision.
 
-**Status:** the project was reset on 2026-07-09 to realign with the client's
-technical spec. **There is no runnable application yet** — implementation
-starts at PRD Phase 0. The previous product ("Shortlist") is preserved in git
-history at commit `db5e511`.
+**Status:** Phase 0 (desktop foundation) implemented — Electron shell, local
+server, SQLite schema (13 tables), `jobpin-data` scaffold, Windows NSIS
+installer. Phase 1 (job workspace & candidate intake) is next: PRD section 10.
+The pre-reset product ("Shortlist") is preserved in git history at `db5e511`.
 
 ## Project docs
 
@@ -41,5 +41,18 @@ AI steps call the configured model API.
 
 ## Run it
 
-Nothing to run yet. Phase 0 (Electron shell, local server, SQLite schema) is the
-first implementation step — see PRD §11.
+Prereqs: Node 22+ (see `.nvmrc`), npm. Windows is the supported dev/ship OS (D-14).
+
+    npm install        # postinstall rebuilds better-sqlite3 for Electron's ABI
+    npm run dev        # launch the app (dev mode, HMR)
+    npm test           # unit tests (runs Vitest under Electron's node - do NOT use npx vitest)
+    npm run typecheck
+    npm run dist       # build the Windows NSIS installer into dist/
+
+First launch creates `%USERPROFILE%\jobpin-data\` (your data, all local) and
+`jobpin.db` inside it with the full schema. Packaged-build verification:
+`docs/phase0-install-checklist.md`.
+
+Note: on Node 22.11 the `dist` script needs the bundled
+`NODE_OPTIONS=--experimental-require-module` (already in the script);
+upgrading to Node ≥ 22.12 makes it unnecessary.
