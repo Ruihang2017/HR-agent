@@ -3,6 +3,7 @@ import path from 'node:path'
 import type { DB } from './db'
 import type { JobpinPaths } from './paths'
 import { deriveFolderName } from './naming'
+import { renameSyncWithRetry } from './fsx'
 import { ConflictError, NotFoundError, ValidationError } from './errors'
 
 export interface JobsDeps {
@@ -158,7 +159,7 @@ export function renameJob(deps: JobsDeps, id: number, newName: string): JobDetai
   const oldAbs = path.join(paths.dataRoot, oldFolderRel)
   const newAbs = path.join(paths.dataRoot, newFolderRel)
 
-  fs.renameSync(oldAbs, newAbs) // atomic on the same volume
+  renameSyncWithRetry(oldAbs, newAbs) // atomic on the same volume
   try {
     db.transaction(() => {
       touchName.run(name, id)
@@ -171,7 +172,7 @@ export function renameJob(deps: JobsDeps, id: number, newName: string): JobDetai
       }
     })()
   } catch (e) {
-    fs.renameSync(newAbs, oldAbs) // compensate: put the folder back
+    renameSyncWithRetry(newAbs, oldAbs) // compensate: put the folder back
     throw e
   }
   return getJob(deps, id)

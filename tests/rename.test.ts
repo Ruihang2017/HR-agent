@@ -8,6 +8,7 @@ import { openDatabase, runMigrations, type DB } from '../src/server/db'
 import { migrations } from '../src/server/migrations'
 import { createJob, renameJob, getJob } from '../src/server/jobs'
 import { ConflictError } from '../src/server/errors'
+import { rmrfWithRetry } from './helpers'
 
 let tmp: string
 let db: DB
@@ -23,7 +24,7 @@ beforeEach(() => {
 
 afterEach(() => {
   db.close()
-  fs.rmSync(tmp, { recursive: true, force: true })
+  rmrfWithRetry(tmp)
 })
 
 function addCandidateRows(jobId: number, folderRel: string): void {
