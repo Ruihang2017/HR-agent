@@ -80,6 +80,19 @@ describe('addCandidateFromText', () => {
   it('requires a name', async () => {
     await expect(addCandidateFromText({ db, paths }, jobId, '  ', 'text')).rejects.toThrow(ValidationError)
   })
+
+  it('rolls back the DB row and leaves no partial folder when fs fails', async () => {
+    // Candidate ids are deterministic in a fresh DB: the next insert gets id 1,
+    // so pre-creating a FILE at candidates/candidate_1 makes mkdirSync throw.
+    const blocker = path.join(tmp, 'jobs', 'Barista', 'candidates', 'candidate_1')
+    fs.writeFileSync(blocker, 'not a directory')
+
+    await expect(addCandidateFromText({ db, paths }, jobId, 'Pat', 'some text')).rejects.toThrow()
+
+    expect((db.prepare('SELECT COUNT(*) AS n FROM candidates').get() as { n: number }).n).toBe(0)
+    expect((db.prepare('SELECT COUNT(*) AS n FROM candidate_documents').get() as { n: number }).n).toBe(0)
+    expect(fs.existsSync(blocker)).toBe(false) // cleanup removed the partial artifact
+  })
 })
 
 describe('listCandidates / getCandidate', () => {
