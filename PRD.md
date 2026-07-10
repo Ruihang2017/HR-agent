@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Working name** | Jobpin (local hiring assistant) |
-| **Version** | 2.8 — Canonical |
+| **Version** | 2.9 — Canonical |
 | **Date** | 10 July 2026 |
 | **Owner** | Horace Hou |
 | **Provenance** | Derived in full from the client technical spec (2026-07-09 meeting), preserved verbatim at `docs/meeting_minutes/2026-07-09-jobpin-technical-spec.md` (D-8). **This PRD is the single source of truth**; new client input arrives as new minutes and is applied here by explicit update. |
-| **Status** | Pre-implementation — the repository was reset on 2026-07-09; no product code exists yet |
+| **Status** | Phase 0 (desktop foundation) complete — merged 2026-07-10; Phase 1 (job workspace & candidate intake) is next |
 
 **Version history**
 | Version | Date | Change |
@@ -22,13 +22,14 @@
 | 2.6 | 2026-07-09 | Scope close-out (D-15–D-19): Gmail integration and Jobpin-platform integration become **non-goals**; AU-first developer-supplied lawyer-reviewed templates homed at `templates/au/`; encryption scoped to candidate data only; onboarding-document generation moved to immediately-post-MVP. **No open questions remain.** |
 | 2.7 | 2026-07-09 | Cleanup (D-20): decision log moved to `DECISIONS.md`; Open-questions and Glossary sections removed (all questions resolved — resolutions recorded in `DECISIONS.md`); all section symbols replaced with plain "section N" references; DB key fields rendered as a code block. Sections renumbered: Implementation plan is now 10, Cross-cutting concerns is 11. |
 | 2.8 | 2026-07-10 | Phase 0 design inputs decided: `jobpin-data/` lives in the user's home folder with the DB inside it (D-21, OneDrive-safe); foundation stack = TypeScript + electron-vite + electron-builder (NSIS), Hono server in the Electron main process on an OS-assigned localhost port, better-sqlite3, SQL-file migrations (D-22). |
+| 2.9 | 2026-07-10 | Removed all inline `[spec N]` citations per owner preference — provenance lives in the header Provenance row and the archived minutes themselves. Status updated: Phase 0 complete. |
 
 ## How to use this document
 
-- **This PRD is the source of truth** (per `CLAUDE.md`). It was derived in full from the client technical spec of 2026-07-09, preserved verbatim as archived meeting minutes at `docs/meeting_minutes/2026-07-09-jobpin-technical-spec.md`. Citations like *[spec 4.3]* point at numbered sections of that archived document (Chinese). Future client meetings produce new minutes under `docs/meeting_minutes/`, which are applied to this PRD by explicit update — **minutes are input; the PRD is truth.** If code and PRD disagree, raise the conflict, don't silently patch.
+- **This PRD is the source of truth** (per `CLAUDE.md`). It was derived in full from the client technical spec of 2026-07-09, preserved verbatim as archived meeting minutes at `docs/meeting_minutes/2026-07-09-jobpin-technical-spec.md`. Future client meetings produce new minutes under `docs/meeting_minutes/`, which are applied to this PRD by explicit update — **minutes are input; the PRD is truth.** If code and PRD disagree, raise the conflict, don't silently patch.
 - Do not modify this PRD unless the user explicitly asks (`CLAUDE.md` rule 1).
 - Stable identifiers: functional requirements `F<n>.<m>` and `Phase 0…5` live in this PRD; decision IDs `D-<n>` resolve in **`DECISIONS.md`** (decision index + dated entries). Historical open questions were tracked as `OQ-<n>` — all are resolved; the resolutions are recorded in `DECISIONS.md`.
-- Companion documents: `DECISIONS.md` (decision index + dated log — the home of all D-numbers), `docs/handover/` (one handover per major unit of work), `docs/meeting_minutes/` (archived client meeting outcomes), `templates/` (developer-supplied AU template content), `README.md` (how to run — currently "nothing to run yet").
+- Companion documents: `DECISIONS.md` (decision index + dated log — the home of all D-numbers), `docs/handover/` (one handover per major unit of work), `docs/meeting_minutes/` (archived client meeting outcomes), `templates/` (developer-supplied AU template content), `README.md` (how to run).
 
 ---
 
@@ -40,11 +41,11 @@ A small-business boss who hires occasionally has no HR department and no tooling
 
 ### Product
 
-**Jobpin is a boss-only hiring workbench that runs on the boss's own computer** — the app, the database, and every file live locally; AI analysis calls out to a configurable cloud model API (D-9). *[spec 1, 10]*
+**Jobpin is a boss-only hiring workbench that runs on the boss's own computer** — the app, the database, and every file live locally; AI analysis calls out to a configurable cloud model API (D-9).
 
-There is exactly **one role: the boss**. No HR role, no admin role, no multi-tenancy, no permission matrix, no cloud backend for hiring data (the only vendor-side service is subscription auth/metering — D-10). *[spec 1]*
+There is exactly **one role: the boss**. No HR role, no admin role, no multi-tenancy, no permission matrix, no cloud backend for hiring data (the only vendor-side service is subscription auth/metering — D-10).
 
-Core capabilities *[spec 1]*:
+Core capabilities:
 - Manage all hiring material for a job in one per-job workspace.
 - Analyse how well each candidate's resume matches the job's JD.
 - Generate interview questions, record interviews, and assist ranking.
@@ -52,9 +53,9 @@ Core capabilities *[spec 1]*:
 - Generate invitation emails, onboarding emails, legal documents, and onboarding documents.
 - Keep all data permanently on the local machine.
 
-The system has **no relationship to the external Jobpin platform** — integration of any kind (plugin, import/export bridge, sync layer) is a non-goal (D-18; the minutes' future-integration note *[spec 1]* is deliberately descoped).
+The system has **no relationship to the external Jobpin platform** — integration of any kind (plugin, import/export bridge, sync layer) is a non-goal (D-18; the minutes' future-integration note is deliberately descoped).
 
-### Product stance *[spec 10]*
+### Product stance
 
 "The boss's local hiring workbench, not a SaaS HR platform." The seven boundaries below are product law:
 
@@ -68,17 +69,17 @@ The system has **no relationship to the external Jobpin platform** — integrati
 
 ## 2. Goals & success criteria
 
-The MVP is done when the following full journey works **on one machine with all data persisted locally** — AI steps call the configured model API (D-9); email is templates-only (D-15) *[spec 9]*:
+The MVP is done when the following full journey works **on one machine with all data persisted locally** — AI steps call the configured model API (D-9); email is templates-only (D-15):
 
 > Create a job (folder + JD) → import resumes (upload / paste) → AI analyses each candidate and produces a ranked list with an immutable ranking snapshot → generate interview questions → record an interview manually → post-interview re-ranking (new snapshot) → generate invitation and onboarding email templates → everything persisted in SQLite + local files under `jobpin-data/`.
 
-Concretely, the MVP ships *[spec 9, first list]*: local Electron app · single boss role · job folder creation · JD upload · resume upload · AI candidate analysis · candidate ranking · interview question generation · manual interview records · post-interview re-ranking · invitation email template generation · onboarding email template generation · SQLite persistence · permanent local file storage.
+Concretely, the MVP ships: local Electron app · single boss role · job folder creation · JD upload · resume upload · AI candidate analysis · candidate ranking · interview question generation · manual interview records · post-interview re-ranking · invitation email template generation · onboarding email template generation · SQLite persistence · permanent local file storage.
 
 Success beyond function: every AI conclusion in that journey shows its **evidence source and confidence** (section 7), every ranking is **explainable from its snapshot** (F4), and nothing was decided or sent without the boss's explicit action (section 11.1 invariants).
 
 ## 3. Non-goals (MVP)
 
-Explicitly **not** built in the first version *[spec 9, second list]*:
+Explicitly **not** built in the first version:
 
 - Multi-user permissions.
 - Cloud sync.
@@ -90,24 +91,24 @@ Explicitly **not** built in the first version *[spec 9, second list]*:
 - Video interview analysis.
 - Large-scale hiring pipelines.
 - Tight coupling to the Jobpin platform.
-- **Email-service integration (Gmail MCP/API)** — the product generates email *templates* only; the boss sends from their own mail client. The minutes' optional-Gmail lines *[spec 2, 4.2]* are deliberately descoped (D-15).
+- **Email-service integration (Gmail MCP/API)** — the product generates email *templates* only; the boss sends from their own mail client. The minutes' optional-Gmail lines are deliberately descoped (D-15).
 - **Jobpin-platform integration of any kind** — no plugin, import/export bridge, or sync layer (D-18).
 
-Additional standing boundaries: no protected attributes, zodiac (星座), bazi (八字), or MBTI as ranking/decision inputs, ever — see F3.4 and section 11.1; this is a permanent rule, not an MVP deferral *[spec 4.2, 8]*.
+Additional standing boundaries: no protected attributes, zodiac (星座), bazi (八字), or MBTI as ranking/decision inputs, ever — see F3.4 and section 11.1; this is a permanent rule, not an MVP deferral.
 
 ## 4. Target user
 
-**The boss** — a small-business owner-operator who hires occasionally, reads resumes personally, interviews personally, and decides personally. Works from their own computer; wants candidate data on that computer and nowhere else. Not an HR professional; wants judgment support, not process bureaucracy. There is no secondary user: candidates never touch the system (resumes arrive by upload or paste). *[spec 1, 10]*
+**The boss** — a small-business owner-operator who hires occasionally, reads resumes personally, interviews personally, and decides personally. Works from their own computer; wants candidate data on that computer and nowhere else. Not an HR professional; wants judgment support, not process bureaucracy. There is no secondary user: candidates never touch the system (resumes arrive by upload or paste).
 
-## 5. Core user journeys *[spec 4]*
+## 5. Core user journeys
 
-### 5.1 Create a job *[spec 4.1]*
+### 5.1 Create a job
 The boss inputs or uploads: job name, JD, company values, a job-specific *inject* (AI context), legal document templates, and interview preferences. The system generates: the job folder (per the section 8.2 layout), an initial question bank, scoring dimensions, a candidate-analysis template, and email templates.
 
-### 5.2 Import candidates *[spec 4.2]*
+### 5.2 Import candidates
 Sources: manual resume upload; paste of resume text. (The minutes' optional Gmail auto-fetch is descoped — non-goal, D-15.) Processing pipeline: ① save the original file → ② extract text → ③ analyse against JD + company values + job inject → ④ produce an initial score → ⑤ insert into the ranked candidate list.
 
-### 5.3 AI ranking *[spec 4.3]*
+### 5.3 AI ranking
 Ranking uses **job-relevant factors only**:
 
 ```
@@ -117,100 +118,100 @@ total score = JD fit + key skills + relevant experience + growth trajectory
 
 **Every ranking run is saved as an immutable snapshot** (id, job, timestamp, criteria, per-candidate rank/score/reason) so that: the ranking can be explained later exactly as it stood; candidate movement can be compared across time; and divergence between the AI's suggestion and the boss's final decision can be tracked.
 
-### 5.4 Invite to interview *[spec 4.4]*
-After the boss selects a candidate, the system generates emails from local templates: online interview invitation, onsite invitation, reschedule, rejection, and request-for-more-materials. **The product never sends email — it generates templates only (D-15)**; the boss copies them into their own mail client. This structurally satisfies the spec's human-confirm-before-send rule *[spec 8]*.
+### 5.4 Invite to interview
+After the boss selects a candidate, the system generates emails from local templates: online interview invitation, onsite invitation, reschedule, rejection, and request-for-more-materials. **The product never sends email — it generates templates only (D-15)**; the boss copies them into their own mail client. This structurally satisfies the client's human-confirm-before-send rule.
 
-### 5.5 First-round interview *[spec 4.5]*
+### 5.5 First-round interview
 - **Entry modes:** manual note entry (MVP); voice via STT and optional TTS question read-out (post-MVP, D-6).
 - **Before:** the system generates standard questions, resume-specific questions, JD-risk-point questions, the boss's favourite questions, and follow-up suggestions.
 - **During:** record question, answer, boss's manual notes, AI analysis, confidence, and whether the item affects ranking.
 - **After:** the system outputs an interview summary, soft-skill observations, stability inference, risk points, recommended follow-ups, a next-round recommendation, and a **re-ranking** (new snapshot).
-- **Epistemic principles** *[spec 4.5]*: the boss's manual input is a signal source, **not absolute gold truth**; STT transcripts and AI analyses are not final facts either; **every conclusion records its source and confidence.**
+- **Epistemic principles**: the boss's manual input is a signal source, **not absolute gold truth**; STT transcripts and AI analyses are not final facts either; **every conclusion records its source and confidence.**
 
 ## 6. Functional requirements
 
-Numbering is fresh for v2.0 (the v1.x F-numbers are dead). Each requirement cites its spec basis.
+Numbering is fresh for v2.0 (the v1.x F-numbers are dead).
 
 ### F1 — Job workspace
 
-- **F1.1** Create a job with name + JD; the system creates the per-job folder structure of section 8.2 under `jobpin-data/jobs/{job name}/`, named after the job. *[spec 3, 4.1, 11 tasks 4–5]*
-- **F1.2** Job assets are file-first and boss-editable: `jd.md`, `inject.md` (job-specific AI injection context), `references/` (interview rules, legal notes, company context), `question_bank.json`, `learned_skills.md`. *[spec 3]*
-- **F1.3** On job creation the system generates: initial question bank, scoring dimensions, candidate-analysis template, and email templates. *[spec 4.1]*
-- **F1.4** Company-level assets live once, outside jobs: `company/company_memory.md`, `values.md`, `boss_preferences.json`, `legal_templates/`, `onboarding_templates/`. *[spec 3]*
+- **F1.1** Create a job with name + JD; the system creates the per-job folder structure of section 8.2 under `jobpin-data/jobs/{job name}/`, named after the job.
+- **F1.2** Job assets are file-first and boss-editable: `jd.md`, `inject.md` (job-specific AI injection context), `references/` (interview rules, legal notes, company context), `question_bank.json`, `learned_skills.md`.
+- **F1.3** On job creation the system generates: initial question bank, scoring dimensions, candidate-analysis template, and email templates.
+- **F1.4** Company-level assets live once, outside jobs: `company/company_memory.md`, `values.md`, `boss_preferences.json`, `legal_templates/`, `onboarding_templates/`.
 
 ### F2 — Candidate intake
 
-- **F2.1** Manual resume upload (file) and manual paste (text) create a candidate under the job with the original preserved verbatim. *[spec 4.2, 9]*
-- **F2.2** Text extraction from uploaded files into `resume_text.md`; extraction failure never destroys the original and is surfaced to the boss. *[spec 3, 4.2]*
-- **F2.3** **Descoped — non-goal (D-15).** The minutes' optional Gmail MCP/API intake *[spec 2, 4.2]* is deliberately not built; candidate intake is manual upload/paste (F2.1) only. Revisit only on explicit owner re-scope.
-- **F2.4** Every candidate gets a per-candidate folder (`profile.json`, original resume, `resume_text.md`, `ai_analysis.json`, `interviews/`, `emails/`, `documents/`). *[spec 3]*
+- **F2.1** Manual resume upload (file) and manual paste (text) create a candidate under the job with the original preserved verbatim.
+- **F2.2** Text extraction from uploaded files into `resume_text.md`; extraction failure never destroys the original and is surfaced to the boss.
+- **F2.3** **Descoped — non-goal (D-15).** The minutes' optional Gmail MCP/API intake is deliberately not built; candidate intake is manual upload/paste (F2.1) only. Revisit only on explicit owner re-scope.
+- **F2.4** Every candidate gets a per-candidate folder (`profile.json`, original resume, `resume_text.md`, `ai_analysis.json`, `interviews/`, `emails/`, `documents/`).
 
 ### F3 — AI candidate analysis
 
-- **F3.1** Analysis runs against JD + company values + job inject and produces, per candidate *[spec 4.2]*: JD fit · must-have skills · bonus skills · career continuity · growth trajectory · communication style · soft-skill evidence · risk points · recommended interview questions · AI-recommended rank.
-- **F3.2** Every analysis is persisted (`ai_analysis.json` + `ai_analyses` table) with **provider, model, prompt version, timestamp, input materials, and reasoning**, so any past conclusion can be reconstructed. *[spec 8; provider/model per D-9]*
-- **F3.3** Every conclusion carries an **evidence source and a confidence level**. No naked verdicts. *[spec 4.5, 8, 10]*
-- **F3.4** Sensitive attributes (age, gender, race, religion, marital/fertility status, disability, nationality) are **never used** in analysis or ranking. If sensitive information appears in the input, the system only marks it **"must not be used for decisions."** Zodiac / bazi / MBTI are not decision inputs; they may exist only as boss-entered side notes explicitly labelled non-decisional. *[spec 4.2, 8]*
-- **F3.5** The AI is an adviser, never the decider: analysis output is a recommendation; candidate status changes only by the boss's action. *[spec 8, 10]*
+- **F3.1** Analysis runs against JD + company values + job inject and produces, per candidate: JD fit · must-have skills · bonus skills · career continuity · growth trajectory · communication style · soft-skill evidence · risk points · recommended interview questions · AI-recommended rank.
+- **F3.2** Every analysis is persisted (`ai_analysis.json` + `ai_analyses` table) with **provider, model, prompt version, timestamp, input materials, and reasoning**, so any past conclusion can be reconstructed.
+- **F3.3** Every conclusion carries an **evidence source and a confidence level**. No naked verdicts.
+- **F3.4** Sensitive attributes (age, gender, race, religion, marital/fertility status, disability, nationality) are **never used** in analysis or ranking. If sensitive information appears in the input, the system only marks it **"must not be used for decisions."** Zodiac / bazi / MBTI are not decision inputs; they may exist only as boss-entered side notes explicitly labelled non-decisional.
+- **F3.5** The AI is an adviser, never the decider: analysis output is a recommendation; candidate status changes only by the boss's action.
 
 ### F4 — Ranking
 
-- **F4.1** Ranked candidate list per job, computed from job-relevant factors only, per the section 5.3 formula. *[spec 4.3]*
-- **F4.2** **Ranking snapshots are mandatory and immutable**: every ranking run persists `{ranking_id, job, created_at, criteria, result[{candidate_id, rank, score, reason}]}` (tables `rankings` + `ranking_items`). Snapshots are never edited or deleted by the application. *[spec 4.3]*
-- **F4.3** Per-candidate `reason` in every snapshot makes each rank explainable in one sentence or more. *[spec 4.3, 8]*
-- **F4.4** The boss's final decision is recorded **separately** from the AI's recommendation, so AI-vs-boss divergence is trackable over time. *[spec 4.3, 8]*
-- **F4.5** Post-interview re-ranking produces a **new** snapshot; history is preserved. *[spec 4.5, 9]*
+- **F4.1** Ranked candidate list per job, computed from job-relevant factors only, per the section 5.3 formula.
+- **F4.2** **Ranking snapshots are mandatory and immutable**: every ranking run persists `{ranking_id, job, created_at, criteria, result[{candidate_id, rank, score, reason}]}` (tables `rankings` + `ranking_items`). Snapshots are never edited or deleted by the application.
+- **F4.3** Per-candidate `reason` in every snapshot makes each rank explainable in one sentence or more.
+- **F4.4** The boss's final decision is recorded **separately** from the AI's recommendation, so AI-vs-boss divergence is trackable over time.
+- **F4.5** Post-interview re-ranking produces a **new** snapshot; history is preserved.
 
 ### F5 — Interview support
 
-- **F5.1** Pre-interview question generation: standard + resume-specific + JD-risk + boss-favourite questions + follow-up suggestions, drawing on `question_bank.json` and `learned_skills.md`. *[spec 4.5, 6]*
-- **F5.2** The question bank must avoid unlawful or high-risk questions. *[spec 8]*
-- **F5.3** Interview recording (MVP: manual entry): per item — question, answer, boss note, AI analysis, confidence, affects-ranking flag. Stored under the candidate's `interviews/` folder plus the `interviews`/`interview_questions`/`interview_answers` tables. *[spec 4.5, 7, 9]*
-- **F5.4** Post-interview outputs: summary, soft-skill observations, stability inference, risks, recommended follow-ups, next-round recommendation, re-ranking trigger. *[spec 4.5]*
-- **F5.5** *(Post-MVP)* Voice: STT for interview capture, optional TTS to read questions aloud. *[spec 2, 4.5; D-6]*
+- **F5.1** Pre-interview question generation: standard + resume-specific + JD-risk + boss-favourite questions + follow-up suggestions, drawing on `question_bank.json` and `learned_skills.md`.
+- **F5.2** The question bank must avoid unlawful or high-risk questions.
+- **F5.3** Interview recording (MVP: manual entry): per item — question, answer, boss note, AI analysis, confidence, affects-ranking flag. Stored under the candidate's `interviews/` folder plus the `interviews`/`interview_questions`/`interview_answers` tables.
+- **F5.4** Post-interview outputs: summary, soft-skill observations, stability inference, risks, recommended follow-ups, next-round recommendation, re-ranking trigger.
+- **F5.5** *(Post-MVP — D-6)* Voice: STT for interview capture, optional TTS to read questions aloud.
 
 ### F6 — Communications & documents
 
-- **F6.1** Email template generation from local templates: online/onsite invitations, reschedule, rejection, more-materials, onboarding. The product generates **templates only — it never sends email** (D-15); the boss sends from their own mail client, which structurally satisfies the confirm-before-send rule. *[spec 4.4, 8, 9]*
-- **F6.2** *(Immediately post-MVP — D-19)* Onboarding document generation from `onboarding_templates/`; first backlog item after the MVP ships. *[spec 1, 11 task 13]*
-- **F6.3** *(Post-MVP)* Legal document generation (offer, contract) from `legal_templates/`; every template carries a **version and jurisdiction tag** (AU-first — D-16); template content is **developer-supplied and lawyer-reviewed**, homed in the repo at `templates/au/legal/` and bundled as app defaults (D-16); every generated offer/contract/onboarding document requires **human review** before use. *[spec 8]*
-- **F6.4** Rendering via a template engine (Handlebars or Markdown → PDF/DOCX — engine choice is a Phase 4 design decision). *[spec 2]*
+- **F6.1** Email template generation from local templates: online/onsite invitations, reschedule, rejection, more-materials, onboarding. The product generates **templates only — it never sends email** (D-15); the boss sends from their own mail client, which structurally satisfies the confirm-before-send rule.
+- **F6.2** *(Immediately post-MVP — D-19)* Onboarding document generation from `onboarding_templates/`; first backlog item after the MVP ships.
+- **F6.3** *(Post-MVP)* Legal document generation (offer, contract) from `legal_templates/`; every template carries a **version and jurisdiction tag** (AU-first — D-16); template content is **developer-supplied and lawyer-reviewed**, homed in the repo at `templates/au/legal/` and bundled as app defaults (D-16); every generated offer/contract/onboarding document requires **human review** before use.
+- **F6.4** Rendering via a template engine (Handlebars or Markdown → PDF/DOCX — engine choice is a Phase 4 design decision).
 
 ### F7 — Memory & skills accumulation
 
-- **F7.1** Three memory scopes, **isolated from each other** *[spec 5]*:
+- **F7.1** Three memory scopes, **isolated from each other**:
   - **Company memory** (`company/company_memory.md`): values, long-term boss preferences, profiles of employees who worked out, risk patterns that didn't fit, interview lessons, legal notes.
   - **Job memory** (`jobs/{job}/learned_skills.md`): effective questions for this job, boss-favourite questions, common candidate risks, job-specific judgment criteria, lessons inferred from past hiring outcomes.
   - **Candidate memory** (`candidates/{id}/profile.json`): resume, AI analysis, interview records, email records, ranking history, final decision.
-- **F7.2** **Propose → approve → write.** After an interview the AI may *propose* job-memory updates; nothing is written to `learned_skills.md` until the boss confirms; confirmed updates are referenced by the next question-bank generation. Memory writes are recorded as `memory_events` rows with `approved_by_boss`. *[spec 6, 7]*
-- **F7.3** The AI may learn boss preferences (they are a ranking factor, section 5.3) but **must not learn discriminatory preferences** — proposals that encode protected attributes are refused/flagged, not stored. *[spec 10, 8]*
+- **F7.2** **Propose → approve → write.** After an interview the AI may *propose* job-memory updates; nothing is written to `learned_skills.md` until the boss confirms; confirmed updates are referenced by the next question-bank generation. Memory writes are recorded as `memory_events` rows with `approved_by_boss`.
+- **F7.3** The AI may learn boss preferences (they are a ranking factor, section 5.3) but **must not learn discriminatory preferences** — proposals that encode protected attributes are refused/flagged, not stored.
 
 ### F8 — Data protection & trust
 
-- **F8.1** All candidate data lives permanently on the local machine — SQLite + `jobpin-data/` folders. The app persists nothing in any cloud. AI analysis sends the necessary candidate content to the configured model API at call time (stateless, D-9); the model-selection UI discloses this and the provider-choice risk, with a liability disclaimer in the terms (D-11). *[spec 1, 2, 10]*
-- **F8.2** **Candidate data — and only candidate data — is encrypted at rest** (D-17): the `candidates/` trees and candidate-bearing DB content. Company/job files (JD, values, templates, question banks, learned skills) stay plain for file-first transparency (section 7). Mechanism (key management, file vs DB layer) is Phase 5 design. *[spec 8, 11 task 14]*
-- **F8.3** Candidate data **deletion** is supported. *[spec 8]*
-- **F8.4** Local **backup** (and restore) of the data set. *[spec 11 task 14; destination/format at Phase 5 design]*
-- **F8.5** The LLM system prompt carries these hard constraints verbatim (translated from spec 8):
+- **F8.1** All candidate data lives permanently on the local machine — SQLite + `jobpin-data/` folders. The app persists nothing in any cloud. AI analysis sends the necessary candidate content to the configured model API at call time (stateless, D-9); the model-selection UI discloses this and the provider-choice risk, with a liability disclaimer in the terms (D-11).
+- **F8.2** **Candidate data — and only candidate data — is encrypted at rest** (D-17): the `candidates/` trees and candidate-bearing DB content. Company/job files (JD, values, templates, question banks, learned skills) stay plain for file-first transparency (section 7). Mechanism (key management, file vs DB layer) is Phase 5 design.
+- **F8.3** Candidate data **deletion** is supported.
+- **F8.4** Local **backup** (and restore) of the data set; destination/format decided at Phase 5 design.
+- **F8.5** The LLM system prompt carries these hard constraints verbatim (translated from the client minutes):
   > You are a hiring assistance system, not the final decision maker. You may only analyse based on job-relevant evidence. You must not use protected attributes or job-irrelevant personal characteristics in ranking. If the input contains sensitive information, you may only mark it "must not be used for decisions." Every conclusion must include its evidence source and confidence.
-- **F8.6** Legal disclaimer: none of the system's legal-adjacent output is legal advice; before use in real hiring it must be reviewed by a local lawyer. *[spec 8]*
+- **F8.6** Legal disclaimer: none of the system's legal-adjacent output is legal advice; before use in real hiring it must be reviewed by a local lawyer.
 
 ## 7. Non-functional requirements
 
-- **Local-first data.** All persistence is local (SQLite + `jobpin-data/`); the app stores nothing in any cloud. Network touchpoints are transactional only: the configured model API for AI features (D-9) and subscription auth/token issuance (D-10, D-12); the app degrades gracefully offline — everything except AI analysis/generation still works (offline grace for subscription validation is a Phase 2 design item). *[spec 1, 2; model layer per D-9]*
-- **Single-role simplicity.** One boss — no multi-user accounts, roles, or permission checks; the OS user session is the trust boundary (plus at-rest encryption, F8.2). The only sign-in is subscription activation for model access (D-10). *[spec 1]*
-- **Explainability & auditability.** AI analyses versioned with inputs and reasoning (F3.2); rankings snapshotted immutably (F4.2); boss decisions recorded separately (F4.4). Reconstructing "why did it say that, then?" is a first-class requirement. *[spec 4.3, 8]*
-- **Honesty under uncertainty.** Source + confidence on every conclusion; boss input, STT, and AI output are all treated as fallible signals. *[spec 4.5]*
+- **Local-first data.** All persistence is local (SQLite + `jobpin-data/`); the app stores nothing in any cloud. Network touchpoints are transactional only: the configured model API for AI features (D-9) and subscription auth/token issuance (D-10, D-12); the app degrades gracefully offline — everything except AI analysis/generation still works (offline grace for subscription validation is a Phase 2 design item).
+- **Single-role simplicity.** One boss — no multi-user accounts, roles, or permission checks; the OS user session is the trust boundary (plus at-rest encryption, F8.2). The only sign-in is subscription activation for model access (D-10).
+- **Explainability & auditability.** AI analyses versioned with inputs and reasoning (F3.2); rankings snapshotted immutably (F4.2); boss decisions recorded separately (F4.4). Reconstructing "why did it say that, then?" is a first-class requirement.
+- **Honesty under uncertainty.** Source + confidence on every conclusion; boss input, STT, and AI output are all treated as fallible signals.
 - **Provider-agnostic AI.** All model calls go through one model-gateway abstraction with switchable providers — OpenAI, DeepSeek, Anthropic (Claude) (D-9). The boss never handles API keys: model access comes with the subscription, and the boss picks from the in-app model catalog their plan allows (D-10). No provider SDK outside the gateway; switching models must never touch feature code. Every analysis records the provider + model that produced it (F3.2).
-- **File-first transparency.** The boss can open `jobpin-data/` and read/edit their material as plain files (Markdown/JSON); the DB indexes and relates, the folder is the substance. Candidate folders become the deliberate exception once Phase 5 encryption lands (D-17). *[spec 3]*
+- **File-first transparency.** The boss can open `jobpin-data/` and read/edit their material as plain files (Markdown/JSON); the DB indexes and relates, the folder is the substance. Candidate folders become the deliberate exception once Phase 5 encryption lands (D-17).
 
-## 8. Data model *[spec 3, 7]*
+## 8. Data model
 
 ### 8.1 SQLite (MVP)
 
 Tables: `jobs, candidates, candidate_documents, interviews, interview_questions, interview_answers, ai_analyses, rankings, ranking_items, emails, memory_events, documents, settings`. SQLite is sufficient for the MVP.
 
-Key fields as specified *[spec 7]*:
+Key fields as specified in the client minutes:
 
 ```txt
 jobs:                 id, name, folder_path, jd_path, inject_path, created_at, updated_at
@@ -231,9 +232,9 @@ memory_events:        id, scope, scope_id, source_type, source_id, content,
                       approved_by_boss, created_at
 ```
 
-Fields for the remaining tables (`interview_questions`, `interview_answers`, `ai_analyses`, `emails`, `documents`, `settings`) are defined at Phase 0 design time within the spec's table list.
+Fields for the remaining tables (`interview_questions`, `interview_answers`, `ai_analyses`, `emails`, `documents`, `settings`) were defined at Phase 0 design time within the minutes' table list (see the Phase 0 design spec).
 
-### 8.2 File layout *[spec 3]*
+### 8.2 File layout
 
 `jobpin-data/` lives directly in the user's home folder (e.g. `C:\Users\<boss>\jobpin-data`) — visible for file-first transparency, yet outside OneDrive's default sync scope, which would otherwise silently upload candidate data (D-21). The SQLite database lives inside it (`jobpin-data/jobpin.db`), so **one folder is the complete data set** — the unit of backup and restore (F8.4).
 
@@ -268,7 +269,7 @@ jobpin-data/
 
 DB rows reference file paths (`folder_path`, `jd_path`, `transcript_path`, …): **files are the substance, the DB is the index.**
 
-## 9. Architecture *[spec 2]*
+## 9. Architecture
 
 Distribution: a **local installer**. Runtime shape:
 
@@ -297,7 +298,7 @@ MVP stack (concrete per D-22): Electron · React + TypeScript (D-3) · electron-
 
 ## 10. Implementation plan
 
-Phases group the spec's recommended build order (tasks 1–14, *[spec 11]*), each mapped `(task n)`. Every phase is a self-contained brief: a future design session should be able to start from its section alone. Decision IDs (D-n) resolve in `DECISIONS.md`. **No phase has started.**
+Phases group the client minutes' recommended build order (tasks 1–14), each phase mapping its tasks as `(task n)`. Every phase is a self-contained brief: a future design session should be able to start from its section alone. Decision IDs (D-n) resolve in `DECISIONS.md`.
 
 ### Phase 0 — Desktop foundation *(tasks 1–3)*
 
@@ -323,14 +324,14 @@ Phases group the spec's recommended build order (tasks 1–14, *[spec 11]*), eac
 - **Scope:** the model-gateway module with provider adapters (OpenAI, DeepSeek, Anthropic Claude); model selection from the plan's catalog (D-13: Free / Pro tiers) + subscription activation in settings (`settings` table; token-issuance client per D-12, stubbed with dev credentials until the vendor service exists — a Phase 2 design item); the provider-risk disclosure at model selection (D-11); candidate analysis producing all F3.1 dimensions with evidence + confidence (F3.3) into `ai_analysis.json` + `ai_analyses`; sensitive-info flagging (F3.4); system-prompt hard constraints (F8.5); ranked list + immutable snapshots (F4.1–F4.3); section 5.3 scoring composition. **Out:** interview flows; boss-preference *learning* (Phase 3 — but `boss_preferences.json` may be read if present).
 - **Technical approach:** the gateway is the single call site — every call logged into `ai_analyses` with provider, model, prompt version, inputs, and reasoning (F3.2); structured JSON outputs validated against schemas, with a per-provider structured-output strategy (native JSON/tool modes where available, validate-and-retry otherwise); ranking math in code — the LLM contributes component judgments and reasons, code composes the total (auditable arithmetic); no-network / auth-failure states degrade to a visible "analysis unavailable — retry" (section 11.2), never a fabricated score.
 - **Dependencies:** Phase 1. Tiers/catalog are set (D-13); token-issuance mechanics are designed within this phase (see risks); the vendor service can be stubbed with dev credentials and does not gate the gateway build.
-- **Acceptance criteria:** import 5 resumes → each gets a complete analysis (all F3.1 dimensions, each with evidence + confidence); **switching provider in settings re-routes the next analysis with zero feature-code changes**, and the analysis record shows the new provider + model; model selection shows the provider-risk disclosure (D-11); a resume containing age/marital status yields a "must not be used for decisions" flag and those attributes demonstrably don't move the score; ranking produces a snapshot row-for-row matching the spec 4.3 JSON shape; re-running ranking appends a new snapshot, never mutates the old; with the network unplugged, analysis shows the unavailable state and everything else keeps working.
+- **Acceptance criteria:** import 5 resumes → each gets a complete analysis (all F3.1 dimensions, each with evidence + confidence); **switching provider in settings re-routes the next analysis with zero feature-code changes**, and the analysis record shows the new provider + model; model selection shows the provider-risk disclosure (D-11); a resume containing age/marital status yields a "must not be used for decisions" flag and those attributes demonstrably don't move the score; ranking produces a snapshot row-for-row matching the section 5.3 snapshot shape; re-running ranking appends a new snapshot, never mutates the old; with the network unplugged, analysis shows the unavailable state and everything else keeps working.
 - **Risks:** cross-provider output variance — the same prompts must yield schema-valid, comparable analyses on all three providers (a small cross-provider eval set is part of this phase); usage/quota visibility for the boss (allowances per D-13); token-issuance design items: per-provider key/budget APIs (DeepSeek's controls are the thinnest — confirm, or proxy DeepSeek only), key TTL/rotation, revocation on cancel, offline grace period, free-tier abuse controls, at-cap behaviour, exact per-tier allowances.
 
 ### Phase 3 — Interview loop & memory *(tasks 9–11)*
 
 - **Objective:** close the hiring loop: prepare questions, record what happened, learn from it — with the boss approving every memory write.
 - **Scope:** question generation (F5.1, F5.2) from JD + resume + `question_bank.json` + `learned_skills.md` + boss preferences; manual interview recording (F5.3); post-interview outputs + re-ranking (F5.4, F4.5); memory-update proposals with boss approval → `learned_skills.md` + `memory_events` (F7.2, F7.3). **Out:** STT/TTS (post-MVP).
-- **Technical approach:** interview entities per section 8.1 (`interviews`, `interview_questions`, `interview_answers`) + `interviews/` files; per-item source + confidence recorded (spec 4.5 principles); proposal/approval UI for skills; discriminatory-preference proposals blocked at the gateway (F7.3).
+- **Technical approach:** interview entities per section 8.1 (`interviews`, `interview_questions`, `interview_answers`) + `interviews/` files; per-item source + confidence recorded (the section 5.5 epistemic principles); proposal/approval UI for skills; discriminatory-preference proposals blocked at the gateway (F7.3).
 - **Dependencies:** Phase 2.
 - **Acceptance criteria:** generate a question set showing all five F5.1 categories; record a round with per-item boss notes + AI analysis + confidence; post-interview summary produced and a new ranking snapshot appears; an AI skill proposal only lands in `learned_skills.md` after explicit approval (and a rejected one is recorded as rejected in `memory_events`); a proposal encoding a protected attribute is refused with a visible reason.
 - **Risks:** "affects-ranking" flag semantics (which interview items feed the interview-performance factor) need crisp design; memory quality — bad approved lessons compound, so proposals must show their evidence.
@@ -354,7 +355,7 @@ Phases group the spec's recommended build order (tasks 1–14, *[spec 11]*), eac
 
 ### Post-MVP backlog *(not scheduled)*
 
-**First in line (immediately post-MVP, D-19):** onboarding document generation from `onboarding_templates/` (F6.2 — spec task 13). Then: STT interview capture + TTS (F5.5) · legal document generation (offer/contract) from the AU lawyer-reviewed set in `templates/au/legal/` (F6.3, D-16) · multi-round interview depth. **Gmail and Jobpin-platform integration are non-goals** (D-15, D-18) — revisited only on explicit owner re-scope.
+**First in line (immediately post-MVP, D-19):** onboarding document generation from `onboarding_templates/` (F6.2 — minutes task 13). Then: STT interview capture + TTS (F5.5) · legal document generation (offer/contract) from the AU lawyer-reviewed set in `templates/au/legal/` (F6.3, D-16) · multi-round interview depth. **Gmail and Jobpin-platform integration are non-goals** (D-15, D-18) — revisited only on explicit owner re-scope.
 
 ### Dependency chain
 
@@ -365,7 +366,7 @@ Phase 0 ─▶ Phase 1 ─▶ Phase 2 ─▶ Phase 3 ─▶ Phase 5
 
 ## 11. Cross-cutting concerns
 
-### 11.1 Product invariants (every phase, no exceptions) *[spec 8, 10]*
+### 11.1 Product invariants (every phase, no exceptions)
 
 1. **The AI never makes the final hiring decision** — it analyses and recommends; only the boss changes a candidate's fate, and the boss's decision is recorded separately from the AI's recommendation.
 2. **Ranking is explainable and job-relevant only.** No protected attributes (age, gender, race, religion, marital/fertility, disability, nationality); no zodiac/bazi/MBTI in any decision path — at most boss-entered side notes explicitly labelled "not a decision basis."
@@ -380,7 +381,7 @@ Phase 0 ─▶ Phase 1 ─▶ Phase 2 ─▶ Phase 3 ─▶ Phase 5
 ### 11.2 Error & uncertainty handling
 
 - Extraction/analysis failures never lose the original artifact and never silently drop a candidate — the boss sees a flagged state.
-- All signals (boss notes, STT later, AI output) carry source + confidence; conflicting signals coexist rather than overwrite (spec 4.5).
+- All signals (boss notes, STT later, AI output) carry source + confidence; conflicting signals coexist rather than overwrite.
 - Model-API failures (no network, invalid key, rate limits, malformed output) degrade to a visible "analysis unavailable — retry" state, never a fabricated score.
 
 ### 11.3 AI-layer conventions
@@ -390,7 +391,7 @@ Phase 0 ─▶ Phase 1 ─▶ Phase 2 ─▶ Phase 3 ─▶ Phase 5
 - Prompts are versioned assets, not inline strings; `inject.md`, `references/`, and memory files are injected as clearly delimited context.
 - Resume and email content is untrusted input: delimited, never merged into the system prompt (which carries the F8.5 constraints).
 
-### 11.4 Testing & engineering conventions *(ours — the spec is silent on testing)*
+### 11.4 Testing & engineering conventions *(ours — the client minutes are silent on testing)*
 
 - Each phase's acceptance criteria become executable tests where feasible; AI-dependent tests use a faked gateway offline plus a small live smoke suite.
 - Windows is the dev machine and the only shipped/supported OS in MVP (D-14) — but keep code cross-platform-safe (no Windows-only path or credential assumptions) so macOS later is a packaging task, not a port.
