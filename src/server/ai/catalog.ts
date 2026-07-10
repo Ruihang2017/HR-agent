@@ -1,4 +1,4 @@
-﻿export type Provider = 'openai' | 'deepseek' | 'anthropic'
+export type Provider = 'openai' | 'deepseek' | 'anthropic'
 export type PlanTier = 'free' | 'pro'
 
 export interface CatalogModel { id: string; label: string; tiers: PlanTier[] }
