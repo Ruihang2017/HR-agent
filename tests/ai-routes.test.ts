@@ -103,6 +103,20 @@ describe('POST /jobs/:id/analyses + GET /jobs/:id/analyses', () => {
     expect(res.status).toBe(404)
   })
 
+  it('400 with message when the job has no JD (Bug B)', async () => {
+    const jobRes = await app.request('/jobs', json({ name: 'No JD Job' }))
+    const { id: jobId } = await jobRes.json()
+    await app.request(`/jobs/${jobId}/candidates`, json({ name: 'Pat', text: 'Ten years of sales experience.' }))
+
+    const res = await app.request(`/jobs/${jobId}/analyses`, json({}))
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toMatch(/no JD/)
+
+    const count = db.prepare('SELECT COUNT(*) AS n FROM analysis_tasks').get() as { n: number }
+    expect(count.n).toBe(0)
+  })
+
   it('malformed JSON body -> 400, no tasks created (never falls back to "analyse all new")', async () => {
     const jobRes = await app.request('/jobs', json({ name: 'Barista', jd: 'Serve coffee' }))
     const { id: jobId } = await jobRes.json()

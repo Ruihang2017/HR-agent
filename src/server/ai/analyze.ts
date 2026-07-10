@@ -69,6 +69,9 @@ export async function analyzeCandidate(deps: AnalyzeDeps, candidateId: number): 
       .map(f => ({ name: f, text: readRel(`references/${f}`, `${refsDir}/${f}`) ?? '' }))
       .filter(r => r.text)
   }
+  if (!materials.jd.trim()) {
+    throw new ValidationError('job has no JD - add a job description before analysing')
+  }
 
   // --- model call happens BEFORE any DB write --------------------------
   const { system, user } = buildAnalysisPrompt(materials)

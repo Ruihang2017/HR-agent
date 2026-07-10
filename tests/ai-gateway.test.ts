@@ -120,5 +120,6 @@ describe('openai adapter request shape', () => {
     expect(body.response_format.type).toBe('json_schema')
     expect(body.response_format.json_schema.strict).toBe(true)
     expect(body.messages[0].role).toBe('system')
+    expect(body.messages[0].content.endsWith('Respond only with the single JSON object required by the response schema.')).toBe(true)
   })
 })

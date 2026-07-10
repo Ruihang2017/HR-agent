@@ -175,6 +175,13 @@ describe('analyzeCandidate', () => {
     await expect(analyzeCandidate(deps, c.id)).rejects.toThrow(/no extracted text/)
   })
 
+  it('rejects with ValidationError when the job has no JD (Bug B)', async () => {
+    const jobNoJd = createJob({ db, paths }, 'No JD Job')
+    const c = await addCandidateFromText({ db, paths }, jobNoJd.id, 'Pat', 'Ten years of sales.')
+    await expect(analyzeCandidate(deps, c.id)).rejects.toThrow(ValidationError)
+    await expect(analyzeCandidate(deps, c.id)).rejects.toThrow(/no JD/)
+  })
+
   it('rejects with NotFoundError for an unknown candidate', async () => {
     await expect(analyzeCandidate(deps, 999)).rejects.toThrow(NotFoundError)
   })

@@ -9,7 +9,7 @@ import { openDatabase, runMigrations, type DB } from '../src/server/db'
 import { migrations } from '../src/server/migrations'
 import { createJob } from '../src/server/jobs'
 import { addCandidateFromFile, addCandidateFromText, type CandidateDetail } from '../src/server/candidates'
-import { NotFoundError, ConflictError } from '../src/server/errors'
+import { NotFoundError, ConflictError, ValidationError } from '../src/server/errors'
 import { GatewayError } from '../src/server/ai/gateway'
 import type { AnalyzeDeps } from '../src/server/ai/analyze'
 import { createQueue, type AnalysisQueue, type TaskRow } from '../src/server/ai/queue'
@@ -220,6 +220,13 @@ describe('AnalysisQueue', () => {
     expect(succeededRow.status).toBe('succeeded')
 
     expect(() => queue.retry(taskId)).toThrow(ConflictError)
+  })
+
+  it('rejects enqueueing analyses for a job with no JD (Bug B)', async () => {
+    const jobNoJd = createJob(svcDeps, 'No JD Job')
+    await addCandidateFromText(svcDeps, jobNoJd.id, 'Pat', 'Ten years of sales.')
+    expect(() => queue.enqueueAnalyses(jobNoJd.id)).toThrow(ValidationError)
+    expect(() => queue.enqueueAnalyses(jobNoJd.id)).toThrow(/no JD/)
   })
 
   it('membership: a candidate from another job is skipped; an unknown job throws NotFoundError', async () => {
