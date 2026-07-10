@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Netlify form definitions</title></head>
+  <body>
+    <!-- Static form definition so Netlify Forms detects the "feedback" form at deploy time.
+         The real UI is the Vue FeedbackForm component, which POSTs matching fields. -->
+    <form name="feedback" data-netlify="true" netlify-honeypot="bot-field" hidden>
+      <input type="text" name="bot-field" />
+      <input type="text" name="name" />
+      <input type="email" name="email" />
+      <input type="text" name="section" />
+      <textarea name="comment"></textarea>
+      <input type="text" name="page" />
+    </form>
+  </body>
+</html>
