@@ -1,44 +1,50 @@
 # Jobpin — Local-First Hiring Workbench
 
-A boss-only hiring assistant that runs on the boss's own computer:
-Electron desktop app + embedded Node.js local server + SQLite + local files.
-AI analysis calls cloud model APIs (OpenAI / DeepSeek / Claude) through a
-switchable gateway; model access comes with the subscription (Free tier, or
-Pro at A$20/month) — the boss picks a model from the in-app catalog and never
-handles API keys. The app calls providers directly via issued tokens, so
-resumes never transit vendor servers, and all hiring data stays local. One
-role (the boss). The AI analyses and ranks candidates with evidence and
-confidence; the boss makes every decision.
+A boss-only hiring assistant that runs on the boss's own computer: Electron desktop app,
+embedded local server, SQLite + local files. The AI analyses and ranks candidates with evidence
+and confidence; the boss makes every decision. Full definition, scope, and status: **[`PRD.md`](PRD.md)**
+(the source of truth — see its header for current project status).
 
-**Status:** Phase 0 (desktop foundation) implemented — Electron shell, local
-server, SQLite schema (13 tables), `jobpin-data` scaffold, Windows NSIS
-installer. Phase 1 (job workspace & candidate intake) is next: PRD section 10.
-The pre-reset product ("Shortlist") is preserved in git history at `db5e511`.
-
-## Project docs
-
-| Doc | What it holds |
-|---|---|
-| [`PRD.md`](PRD.md) | The source of truth: requirements, architecture, phased plan (English, self-contained) |
-| [`docs/meeting_minutes/`](docs/meeting_minutes/) | Archived client meeting outcomes — incl. the 2026-07-09 technical spec the PRD derives from |
-| [`templates/`](templates/) | Developer-supplied, lawyer-reviewed AU template content (emails, onboarding, legal) |
-| [`DECISIONS.md`](DECISIONS.md) | Decision index (D-1…) + dated log of major decisions and rationale |
-| [`docs/handover/`](docs/handover/) | One handover per major implementation or phase |
-| [`CLAUDE.md`](CLAUDE.md) | Working agreement for contributors (human or AI) |
-| [`site/`](site/) | Docs portal (VitePress) — publishes PRD/decisions/handovers/minutes to Netlify with a feedback form; auto-deploys on push to `main` |
-
-## Planned shape (PRD section 9)
+## Directory structure
 
 ```
-Electron (React) ── Node.js local server ── SQLite (index)
-                          │                  jobpin-data/ (substance: MD/JSON/files)
-                          └── model gateway ⇄ OpenAI / DeepSeek / Claude API
+PRD.md                     product spec (WHAT) — read this first; status in its header
+CONTEXT.md                 glossary — one canonical term per concept
+DECISIONS.md               decision index (D-1…) + dated log (WHY)
+CLAUDE.md                  working agreement for contributors, human or AI (process rules)
+src/                       the app: main / preload / renderer / server (Electron + TS)
+tests/                     Vitest suite (run via `npm test` only — see Run it)
+templates/                 developer-supplied, lawyer-reviewed AU template content
+docs/
+  handover/                one handover per phase / major unit of work
+  meeting_minutes/         archived client meeting outcomes (verbatim, superseded by PRD)
+  superpowers/specs/       per-phase design docs (HOW)
+  superpowers/plans/       per-phase implementation plans
+  phase0-install-checklist.md   packaged-build verification
+  reference/               external reference material (e.g. the doc-system spec)
+site/                      docs portal (VitePress) — auto-deploys to Netlify on push to main
 ```
 
-MVP journey: create job → import resumes → AI analysis + ranked list with
-immutable ranking snapshots → interview questions → manual interview records →
-re-ranking → invitation & onboarding email templates. All data stays local;
-AI steps call the configured model API.
+## Document map (which doc, when)
+
+| Doc | What it is | When to read |
+|---|---|---|
+| [`PRD.md`](PRD.md) | Product spec — the source of truth | **First**, and before any product change |
+| [`CONTEXT.md`](CONTEXT.md) | Glossary | Any time a term is unclear |
+| [`DECISIONS.md`](DECISIONS.md) | Decision registry: index D-1… + dated entries | "Why is it this way?" |
+| [`docs/superpowers/specs/`](docs/superpowers/specs/) | Design docs (HOW) | Building or reviewing a specific part |
+| [`docs/handover/`](docs/handover/) | Phase handovers | Picking up work mid-stream |
+| [`docs/meeting_minutes/`](docs/meeting_minutes/) | Client input, archived verbatim | Tracing a requirement to its origin |
+| [`CLAUDE.md`](CLAUDE.md) | Process rules / working agreement | Before contributing |
+
+## Reading paths by role
+
+- **Product / client:** `PRD.md` → the docs portal (same content, searchable, with a feedback form)
+- **Engineering:** `PRD.md` sections 8–11 → the relevant design spec in `docs/superpowers/specs/` → `DECISIONS.md` for any "why"
+- **AI collaborator (new session):** `CLAUDE.md` → `PRD.md` → `CONTEXT.md` → latest handover in `docs/handover/`
+
+**Decision registry:** the index table at the top of [`DECISIONS.md`](DECISIONS.md).
+**Open questions:** none open — every question raised to date is resolved into a decision (resolution notes live in the `DECISIONS.md` entries).
 
 ## Run it
 

@@ -1,8 +1,11 @@
 # Phase 0 — Desktop Foundation: Design Spec
 
+> Companion: PRD sections 8–10 · CONTEXT.md (terms) · DECISIONS.md (D-21…D-24) | v1.0 · 2026-07-10
+> **This document is the authoritative field-level schema and foundation design** — PRD section 8.1 points here.
+
 **Date:** 2026-07-10
-**Status:** Approved (owner, 2026-07-10)
-**Source requirements:** `PRD.md` v2.8, section 10 Phase 0 (spec tasks 1–3)
+**Status:** Implemented — merged 2026-07-10 (PR #1); all acceptance criteria verified (see handover)
+**Source requirements:** `PRD.md` section 10 Phase 0 (minutes tasks 1–3)
 **Governing decisions:** D-2/D-3 (stack), D-14 (Windows-first), D-21 (data location), D-22 (foundation stack — Approach A)
 
 ## 1. Summary

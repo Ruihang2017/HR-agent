@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Working name** | Jobpin (local hiring assistant) |
-| **Version** | 2.9 — Canonical |
+| **Version** | 2.10 — Canonical |
 | **Date** | 10 July 2026 |
 | **Owner** | Horace Hou |
 | **Provenance** | Derived in full from the client technical spec (2026-07-09 meeting), preserved verbatim at `docs/meeting_minutes/2026-07-09-jobpin-technical-spec.md` (D-8). **This PRD is the single source of truth**; new client input arrives as new minutes and is applied here by explicit update. |
@@ -23,13 +23,14 @@
 | 2.7 | 2026-07-09 | Cleanup (D-20): decision log moved to `DECISIONS.md`; Open-questions and Glossary sections removed (all questions resolved — resolutions recorded in `DECISIONS.md`); all section symbols replaced with plain "section N" references; DB key fields rendered as a code block. Sections renumbered: Implementation plan is now 10, Cross-cutting concerns is 11. |
 | 2.8 | 2026-07-10 | Phase 0 design inputs decided: `jobpin-data/` lives in the user's home folder with the DB inside it (D-21, OneDrive-safe); foundation stack = TypeScript + electron-vite + electron-builder (NSIS), Hono server in the Electron main process on an OS-assigned localhost port, better-sqlite3, SQL-file migrations (D-22). |
 | 2.9 | 2026-07-10 | Removed all inline `[spec N]` citations per owner preference — provenance lives in the header Provenance row and the archived minutes themselves. Status updated: Phase 0 complete. |
+| 2.10 | 2026-07-10 | Documentation-system adoption (D-25): section 8.1 field detail and the Phase 0 technical approach now **point** to the Phase 0 design spec instead of restating it (fixes schema drift — `rankings.criteria` was missing here); section 9 slimmed to WHAT; stale "no repository code" line removed; glossary restored as standalone `CONTEXT.md`. |
 
 ## How to use this document
 
 - **This PRD is the source of truth** (per `CLAUDE.md`). It was derived in full from the client technical spec of 2026-07-09, preserved verbatim as archived meeting minutes at `docs/meeting_minutes/2026-07-09-jobpin-technical-spec.md`. Future client meetings produce new minutes under `docs/meeting_minutes/`, which are applied to this PRD by explicit update — **minutes are input; the PRD is truth.** If code and PRD disagree, raise the conflict, don't silently patch.
 - Do not modify this PRD unless the user explicitly asks (`CLAUDE.md` rule 1).
 - Stable identifiers: functional requirements `F<n>.<m>` and `Phase 0…5` live in this PRD; decision IDs `D-<n>` resolve in **`DECISIONS.md`** (decision index + dated entries). Historical open questions were tracked as `OQ-<n>` — all are resolved; the resolutions are recorded in `DECISIONS.md`.
-- Companion documents: `DECISIONS.md` (decision index + dated log — the home of all D-numbers), `docs/handover/` (one handover per major unit of work), `docs/meeting_minutes/` (archived client meeting outcomes), `templates/` (developer-supplied AU template content), `README.md` (how to run).
+- Companion documents: `CONTEXT.md` (glossary — one canonical term per concept), `DECISIONS.md` (decision index + dated log — the home of all D-numbers), `docs/handover/` (one handover per major unit of work), `docs/meeting_minutes/` (archived client meeting outcomes), `docs/superpowers/specs/` (per-phase design docs — the HOW layer), `templates/` (developer-supplied AU template content), `README.md` (navigation hub + how to run).
 
 ---
 
@@ -211,28 +212,7 @@ Numbering is fresh for v2.0 (the v1.x F-numbers are dead).
 
 Tables: `jobs, candidates, candidate_documents, interviews, interview_questions, interview_answers, ai_analyses, rankings, ranking_items, emails, memory_events, documents, settings`. SQLite is sufficient for the MVP.
 
-Key fields as specified in the client minutes:
-
-```txt
-jobs:                 id, name, folder_path, jd_path, inject_path, created_at, updated_at
-
-candidates:           id, job_id, name, email, phone, status, current_rank,
-                      created_at, updated_at
-
-candidate_documents:  id, candidate_id, type, file_path, extracted_text_path, created_at
-
-interviews:           id, candidate_id, stage, mode, scheduled_at, transcript_path,
-                      summary_path, ai_score, boss_decision, created_at
-
-rankings:             id, job_id, reason, created_at
-
-ranking_items:        id, ranking_id, candidate_id, rank, score, reason
-
-memory_events:        id, scope, scope_id, source_type, source_id, content,
-                      approved_by_boss, created_at
-```
-
-Fields for the remaining tables (`interview_questions`, `interview_answers`, `ai_analyses`, `emails`, `documents`, `settings`) were defined at Phase 0 design time within the minutes' table list (see the Phase 0 design spec).
+**The authoritative field-level schema lives in the Phase 0 design spec (section 5) and the migrations in code (`src/server/migrations/`) — not here.** The client minutes specified the initial key fields; Phase 0 implemented all 13 tables with documented deviations (e.g. `rankings.criteria` was added because the snapshot shape of section 5.3 requires recording the criteria used — see the design spec). This section deliberately stays at the outline level so it cannot drift from the shipped schema.
 
 ### 8.2 File layout
 
@@ -292,22 +272,16 @@ Distribution: a **local installer**. Runtime shape:
        token issuance (D-12)        (candidate content never transits it)
 ```
 
-MVP stack (concrete per D-22): Electron · React + TypeScript (D-3) · electron-vite (dev/build) + electron-builder (NSIS Windows installer, D-14) · **Hono** local server hosted in the Electron main process, bound to `127.0.0.1` on an OS-assigned port · SQLite via **better-sqlite3** with plain SQL-file migrations · local file storage at `~/jobpin-data` (D-21) · **model gateway over cloud LLM APIs — OpenAI / DeepSeek / Anthropic Claude (D-9), subscription-based access (D-10)** · local STT (post-MVP) · Handlebars / Markdown→PDF/DOCX templating. *(The archived minutes' "local LLM runtime, Hermes modified build" was a minute-taking error — see D-9.)*
-
-**No repository code exists yet** — the previous implementation (Python/FastAPI/React web app) was removed on 2026-07-09 and is unrelated to this architecture; see D-1.
+Stack summary: Electron desktop app (React + TypeScript — D-3) · embedded Node local server on `127.0.0.1` · SQLite · local file storage at `~/jobpin-data` (D-21) · **model gateway over cloud LLM APIs — OpenAI / DeepSeek / Anthropic Claude (D-9), subscription-based access (D-10)** · local STT and document templating post-MVP. **Concrete tooling and foundation internals are HOW, and live in the Phase 0 design spec (D-22)** — this section stays at the WHAT level. *(The archived minutes' "local LLM runtime, Hermes modified build" was a minute-taking error — see D-9.)*
 
 ## 10. Implementation plan
 
 Phases group the client minutes' recommended build order (tasks 1–14), each phase mapping its tasks as `(task n)`. Every phase is a self-contained brief: a future design session should be able to start from its section alone. Decision IDs (D-n) resolve in `DECISIONS.md`.
 
-### Phase 0 — Desktop foundation *(tasks 1–3)*
+### Phase 0 — Desktop foundation *(tasks 1–3)* — ✅ complete (2026-07-10)
 
-- **Objective:** a launchable local skeleton — the Electron shell, the embedded Node server, and the persistence substrate — so every later feature has a home.
-- **Scope:** Electron app boot; local server on a localhost port; SQLite schema for all section 8.1 tables; `jobpin-data/` root (in the user's home folder, D-21) + `company/` scaffold creation on first run. **Out:** any AI, any UI beyond a shell window.
-- **Technical approach (locked by D-22):** single-package TypeScript project scaffolded with electron-vite (`src/main`, `src/preload`, `src/renderer`, `src/server`); **Hono** server hosted in the Electron main process, bound to `127.0.0.1:0` (OS-assigned port — no collision handling needed), port handed to the renderer via preload IPC; **better-sqlite3** with numbered SQL migrations tracked in a `migrations` table; **electron-builder** NSIS installer (D-14); single-instance lock. Remaining table fields (section 8.1) are specified in the Phase 0 design spec.
-- **Dependencies:** none.
-- **Acceptance criteria:** fresh install → app opens; server responds on localhost; DB file exists with all 13 tables; `jobpin-data/company/` scaffold (empty templates) created; everything works offline.
-- **Risks:** Windows-only packaging/signing per D-14, but keep the codebase cross-platform-safe (no Windows-only path or credential assumptions — use Electron's cross-platform APIs, e.g. `safeStorage`, for the D-12 tokens); better-sqlite3 native prebuilds must match the Electron ABI (electron-builder's rebuild step handles this — verify in the packaged app, not just dev).
+Delivered: Electron shell, embedded local server, full 13-table SQLite schema, `jobpin-data` scaffold in the user's home folder, Windows NSIS installer. All acceptance criteria verified, including the full packaged-build checklist run by the owner.
+**How it was built lives elsewhere (point, don't restate):** design spec `docs/superpowers/specs/2026-07-10-phase-0-desktop-foundation-design.md` · implementation plan `docs/superpowers/plans/2026-07-10-phase-0-desktop-foundation.md` · handover `docs/handover/2026-07-10-phase-0-desktop-foundation.md`. Decisions: D-21…D-24.
 
 ### Phase 1 — Job workspace & candidate intake *(tasks 4–6)*
 

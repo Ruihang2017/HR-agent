@@ -43,8 +43,34 @@ also have a dated entry below.
 | **D-22** | 2026-07-10 | **Phase 0 foundation stack (Approach A):** single-package TypeScript project; electron-vite (dev/build) + electron-builder (NSIS Windows installer); **Hono** HTTP server hosted in the Electron main process, bound to `127.0.0.1:0` (OS-assigned port, handed to the renderer via preload IPC); **better-sqlite3**; numbered SQL-file migrations tracked in a `migrations` table; single-instance lock. | Shortest path to Phase 0 acceptance with industry-standard parts and the best dev loop; nothing blocks later upgrades (utilityProcess isolation, an ORM) without rearchitecting. Rejected: Electron Forge all-in-one (rougher Vite integration, clunkier Squirrel installer); utilityProcess + Fastify + Drizzle now (more moving parts than the skeleton needs). |
 | **D-23** | 2026-07-10 | **Native-module rebuilds via @electron/rebuild** — `postinstall: electron-rebuild -f -w better-sqlite3` keeps `node_modules` on the Electron ABI; all tests run through `ELECTRON_RUN_AS_NODE=1 electron` (`npm test`), never `npx vitest`. Standing choice, kept after any Node upgrade. | `electron-builder install-app-deps` (the plan's original hook) crashes on Node < 22.12 (needs default `require(esm)`); @electron/rebuild is narrower, faster, and tests then exercise the exact native binary that ships. |
 | **D-24** | 2026-07-10 | **Temporary workaround:** the `dist` script carries `NODE_OPTIONS=--experimental-require-module` so electron-builder packages on the dev machine's Node 22.11. **Remove once the machine runs Node ≥ 22.12** (flag becomes default behaviour); README notes it. | Unblocks Windows packaging today without forcing an immediate machine-level Node upgrade. |
+| **D-25** | 2026-07-10 | **Documentation-system adoption, right-sized.** Adopted from `docs/reference/DOC-SYSTEM-SPEC.md`: standalone `CONTEXT.md` glossary; PRD slimmed to WHAT with pointers to design docs (fixing live schema drift in 8.1); README rebuilt as navigation hub; superseded banner on archived minutes; companion headers on design specs. **Deliberately not adopted, with triggers:** per-file `docs/adr/` split (DECISIONS.md works — revisit at ~40+ entries or when deep-linking is needed); Wide component-overview doc (trigger: Phase 2–3, when gateway/subscription/memory boundaries blur); Deep state-runbook doc (trigger: candidate/interview lifecycles get designed); relocating PRD into docs/; restructuring CLAUDE.md (stays a generic process contract — product red lines remain PRD section 11.1, already numbered and cited from code). | The spec's own right-sizing rule: split on pain, not aspiration — and record which files earned their place. |
 
 ---
+
+### 2026-07-10 — Documentation-system adoption, right-sized (D-25)
+**Decision:** Apply the structure and disciplines of the portable documentation-system spec
+(archived at `docs/reference/DOC-SYSTEM-SPEC.md`) to this project — adopting only what its size
+justifies. **Adopted:** standalone `CONTEXT.md` glossary (definitions + canonical terms with
+_Avoid_ lists — notably "client minutes", never "the spec"); PRD sections 8.1/9/10-Phase-0
+slimmed to WHAT with explicit pointers to the Phase 0 design spec (this fixed a live drift:
+PRD 8.1 was missing `rankings.criteria`, which shipped); README rebuilt as the navigation hub
+(directory tree, doc map, reading paths, decision-registry pointer, open-questions line);
+superseded-banner prepended to the archived minutes (verbatim body untouched; the file's
+read-only protection was preserved); companion headers on design specs.
+**Deliberately not adopted, with re-visit triggers:** per-file `docs/adr/` (DECISIONS.md serves
+the WHY concern; trigger ≈ 40+ entries); Wide component-overview design doc (trigger: Phase 2–3
+multi-component boundaries); Deep state-runbook doc (trigger: candidate/interview lifecycle
+design); moving `PRD.md` into `docs/` (pure churn); restructuring `CLAUDE.md` into product
+red-lines (would reverse the 2026-07-09 governance decision; the spec's real requirement —
+numbered, single-home, citable invariants — is met by PRD section 11.1, which code already cites).
+**Context:** Owner supplied the spec from a sibling project with an assess → right-size →
+migrate process; migration plan M1–M7 approved 2026-07-10.
+**Alternatives:** Full adoption of every file in the spec (rejected — the spec itself warns
+against splitting before the pain); no adoption (rejected — the duplication audit found real
+drift: stale schema in PRD 8.1, a stale "no repository code" line, stack facts in four places).
+**Rationale:** One concern, one home, wired by pointers; the not-adopted list is on record so
+future sessions know these were choices, not oversights.
+**Status:** Active. PRD v2.10.
 
 ### 2026-07-10 — Phase 0 toolchain: @electron/rebuild postinstall (D-23) + Node 22.11 packaging flag (D-24)
 **Decision:** Two related implementation decisions from Phase 0 execution:

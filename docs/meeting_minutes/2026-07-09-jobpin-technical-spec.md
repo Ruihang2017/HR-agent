@@ -1,3 +1,9 @@
+> **Archived meeting minutes (2026-07-09) — provenance only, superseded by [`PRD.md`](../../PRD.md).**
+> The content below is preserved verbatim and is NOT the current source of truth. Known
+> transcription corrections are recorded in `DECISIONS.md` — notably D-9: the "本地模型 / Hermes
+> 魔改版本" line was a minute-taking error; the model layer is cloud APIs behind a switchable gateway.
+
+---
 # Jobpin 本地招聘助手技术文档
 
 ## 1. 产品定位

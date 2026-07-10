@@ -20,6 +20,7 @@ function globMd(relDir) {
 
 const ALLOW = [
   'PRD.md',
+  'CONTEXT.md',
   'DECISIONS.md',
   'docs/phase0-install-checklist.md',
   ...globMd('docs/handover'),

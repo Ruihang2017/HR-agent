@@ -45,6 +45,7 @@ export default defineConfig({
         text: 'Product',
         items: [
           { text: 'PRD — source of truth', link: '/PRD' },
+          { text: 'Glossary (CONTEXT)', link: '/CONTEXT' },
           { text: 'Decisions (index + log)', link: '/DECISIONS' }
         ]
       },
