@@ -44,8 +44,62 @@ also have a dated entry below.
 | **D-23** | 2026-07-10 | **Native-module rebuilds via @electron/rebuild** — `postinstall: electron-rebuild -f -w better-sqlite3` keeps `node_modules` on the Electron ABI; all tests run through `ELECTRON_RUN_AS_NODE=1 electron` (`npm test`), never `npx vitest`. Standing choice, kept after any Node upgrade. | `electron-builder install-app-deps` (the plan's original hook) crashes on Node < 22.12 (needs default `require(esm)`); @electron/rebuild is narrower, faster, and tests then exercise the exact native binary that ships. |
 | **D-24** | 2026-07-10 | **Temporary workaround:** the `dist` script carries `NODE_OPTIONS=--experimental-require-module` so electron-builder packages on the dev machine's Node 22.11. **Remove once the machine runs Node ≥ 22.12** (flag becomes default behaviour); README notes it. | Unblocks Windows packaging today without forcing an immediate machine-level Node upgrade. |
 | **D-25** | 2026-07-10 | **Documentation-system adoption, right-sized.** Adopted from `docs/reference/DOC-SYSTEM-SPEC.md`: standalone `CONTEXT.md` glossary; PRD slimmed to WHAT with pointers to design docs (fixing live schema drift in 8.1); README rebuilt as navigation hub; superseded banner on archived minutes; companion headers on design specs. **Deliberately not adopted, with triggers:** per-file `docs/adr/` split (DECISIONS.md works — revisit at ~40+ entries or when deep-linking is needed); Wide component-overview doc (trigger: Phase 2–3, when gateway/subscription/memory boundaries blur); Deep state-runbook doc (trigger: candidate/interview lifecycles get designed); relocating PRD into docs/; restructuring CLAUDE.md (stays a generic process contract — product red lines remain PRD section 11.1, already numbered and cited from code). | The spec's own right-sizing rule: split on pain, not aspiration — and record which files earned their place. |
+| **D-26** | 2026-07-10 | **Transactional job rename (Phase 1):** filesystem rename first (retry-wrapped), then one DB transaction updating the job row and rewriting every known path column by LIKE-escaped prefix match (`ESCAPE '\'`); on DB failure a compensating rename restores the folder (a compensation failure is logged with both paths and the **original** DB error is rethrown). Display renames that derive the same folder name case-insensitively skip the fs rename and path rewrite entirely. | fs-first is recoverable by compensation; DB-first would leave rows pointing at a folder that never moved. LIKE-escaping stops folder names containing `%`/`_`/`\` from rewriting other jobs' rows. NTFS is case-insensitive — a case-only "rename" must not be treated as a folder move. |
+| **D-27** | 2026-07-10 | **Windows fs-retry policy (Phase 1, standing):** directory renames go through `renameSyncWithRetry` (`src/server/fsx.ts`) — bounded retry (10 × 50 ms, `Atomics.wait` sync sleep) on `EPERM`/`EBUSY`/`EACCES`; test teardown uses the matching `rmrfWithRetry`. | Antivirus/search-indexer briefly locks freshly created folders on Windows; unretried renames flaked at ~25–50% in Phase 1 test runs (pre-existing, proven not introduced by the feature). Real boss machines run AV — this is product hardening, not test convenience. |
+| **D-28** | 2026-07-10 | **Technical design layer adopted at `docs/design/`** — `design-architecture.md` (components & boundaries), `design-memory.md` (data & memory), `design-workflows.md` (feature runbooks) — published on the docs portal and listed as PRD companions. *Partially supersedes D-25:* the "Wide component-overview doc" trigger (Phase 2–3) fired early. Drift control: per-section status tags (Built / Planned), built sections point to phase specs, PRD wins on conflict, docs revised at each phase design session. | The manager reviewing the portal needs the HOW layer to give technical input **before** Phase 2 is built; per-phase specs are per-slice records with no cross-phase overview a reviewer can read in one sitting. |
 
 ---
+
+### 2026-07-10 — Technical design layer at `docs/design/` (D-28, partially supersedes D-25)
+**Decision:** Adopt a maintained technical design layer at `docs/design/`, published on the docs
+portal and listed as a PRD companion: `design-architecture.md` (component panorama, execution
+model, boundaries, error philosophy, AI-layer design intent), `design-memory.md` (file-first data
+& memory system), `design-workflows.md` (per-feature runbooks, built and planned). This partially
+supersedes **D-25**, whose "deliberately not adopted" list deferred a Wide component-overview doc
+with trigger "Phase 2–3, when gateway/subscription/memory boundaries blur" — the trigger fired
+early and for a different reason: stakeholder review.
+**Context:** The owner's manager reviewed the docs portal, endorsed the PRD staying requirements-
+only, and asked for a technical layer showing *how* each part will be achieved so he can make
+technical suggestions **before** Phase 2 build time. Owner concurred (2026-07-10), accepting the
+known drift risk.
+**Drift control (the price of adoption):** every section carries a status tag — **Built (Phase
+N)** sections summarise and point to the authoritative phase spec; **Planned (Phase N)** sections
+are design intent that the phase's design session revises before build. On any conflict the PRD
+wins (CLAUDE.md rule 1). Revising `docs/design/` is a standing item of every phase design session
+(recorded in the Phase 1 handover pick-up notes).
+**Alternatives:** Per-phase specs only (rejected — per-slice records, no cross-phase overview a
+reviewer can read in one sitting); a single monolithic design doc (rejected — the manager's
+reference set from a sibling project splits architecture / memory / workflows, and that split maps
+cleanly onto Jobpin); waiting for the D-25 trigger (rejected — the review value exists now, before
+Phase 2 spends effort).
+**Status:** Active. PRD v2.12 lists the companions; portal sidebar carries a Design section.
+
+### 2026-07-10 — Phase 1 implementation decisions: transactional rename (D-26) + Windows fs-retry policy (D-27)
+**Decision:** Two implementation decisions from Phase 1 execution:
+1. **D-26 — transactional job rename.** `renameJob` renames the folder **first** (retry-wrapped),
+   then runs one DB transaction updating `jobs.name/folder_path/jd_path/inject_path` and rewriting
+   every known path column (`candidate_documents.file_path`/`.extracted_text_path`, plus the
+   currently-empty future columns on `interviews`, `ai_analyses`, `emails`, `documents`) by prefix
+   match — the prefix is LIKE-escaped and matched with `ESCAPE '\'` so folder names containing
+   `%`, `_`, or `\` cannot corrupt other jobs' rows. If the transaction fails, a compensating
+   rename restores the folder; if *that* also fails, the divergence (both paths) is logged and the
+   **original** DB error is rethrown — the root cause is never masked. Fast path: if the new
+   display name derives the same folder name case-insensitively, the folder is untouched and only
+   `jobs.name` changes.
+2. **D-27 — Windows fs-retry policy (standing).** Directory renames go through
+   `renameSyncWithRetry` (`src/server/fsx.ts`): bounded retry — 10 attempts, 50 ms apart via
+   `Atomics.wait` (synchronous, matching the better-sqlite3 sync service layer) — on
+   `EPERM`/`EBUSY`/`EACCES`. Test teardown uses the matching `rmrfWithRetry` (`tests/helpers.ts`).
+**Context:** Phase 1 Tasks 3/5. Windows antivirus/search-indexer briefly locks freshly created
+folders; unretried renames flaked at ~25–50% per run (proven pre-existing, not introduced by the
+feature). The compensation-masking fix was the final whole-branch review's one pre-merge code item.
+**Alternatives:** DB-first rename (rejected — an fs failure would leave DB rows pointing at a
+folder that never moved; fs-first is recoverable by compensation). Path columns derived by join on
+job id instead of stored prefixes (rejected for Phase 1 — schema change, and stored relative paths
+are the file-first convention). Async retry via `setTimeout` (rejected — the service layer is
+deliberately synchronous). `graceful-fs` dependency (rejected — one narrow pattern doesn't justify
+patching all of `fs`).
+**Status:** Active. D-26/D-27 (index above); recorded in the Phase 1 handover.
 
 ### 2026-07-10 — Documentation-system adoption, right-sized (D-25)
 **Decision:** Apply the structure and disciplines of the portable documentation-system spec

@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Working name** | Jobpin (local hiring assistant) |
-| **Version** | 2.10 — Canonical |
+| **Version** | 2.12 — Canonical |
 | **Date** | 10 July 2026 |
 | **Owner** | Horace Hou |
 | **Provenance** | Derived in full from the client technical spec (2026-07-09 meeting), preserved verbatim at `docs/meeting_minutes/2026-07-09-jobpin-technical-spec.md` (D-8). **This PRD is the single source of truth**; new client input arrives as new minutes and is applied here by explicit update. |
-| **Status** | Phase 0 (desktop foundation) complete — merged 2026-07-10; Phase 1 (job workspace & candidate intake) is next |
+| **Status** | Phases 0–1 complete (2026-07-10); Phase 2 (AI analysis & ranking) is next |
 
 **Version history**
 | Version | Date | Change |
@@ -24,13 +24,15 @@
 | 2.8 | 2026-07-10 | Phase 0 design inputs decided: `jobpin-data/` lives in the user's home folder with the DB inside it (D-21, OneDrive-safe); foundation stack = TypeScript + electron-vite + electron-builder (NSIS), Hono server in the Electron main process on an OS-assigned localhost port, better-sqlite3, SQL-file migrations (D-22). |
 | 2.9 | 2026-07-10 | Removed all inline `[spec N]` citations per owner preference — provenance lives in the header Provenance row and the archived minutes themselves. Status updated: Phase 0 complete. |
 | 2.10 | 2026-07-10 | Documentation-system adoption (D-25): section 8.1 field detail and the Phase 0 technical approach now **point** to the Phase 0 design spec instead of restating it (fixes schema drift — `rankings.criteria` was missing here); section 9 slimmed to WHAT; stale "no repository code" line removed; glossary restored as standalone `CONTEXT.md`. |
+| 2.11 | 2026-07-10 | Phase 1 complete: status flipped; section 10 Phase 1 rewritten as delivered-with-pointers (spec / plan / handover; implementation decisions D-26, D-27). |
+| 2.12 | 2026-07-10 | Technical design layer added as companion docs (D-28): `docs/design/` — architecture · data & memory · workflows — the cross-phase HOW overview for technical reviewers; PRD remains the WHAT authority. |
 
 ## How to use this document
 
 - **This PRD is the source of truth** (per `CLAUDE.md`). It was derived in full from the client technical spec of 2026-07-09, preserved verbatim as archived meeting minutes at `docs/meeting_minutes/2026-07-09-jobpin-technical-spec.md`. Future client meetings produce new minutes under `docs/meeting_minutes/`, which are applied to this PRD by explicit update — **minutes are input; the PRD is truth.** If code and PRD disagree, raise the conflict, don't silently patch.
 - Do not modify this PRD unless the user explicitly asks (`CLAUDE.md` rule 1).
 - Stable identifiers: functional requirements `F<n>.<m>` and `Phase 0…5` live in this PRD; decision IDs `D-<n>` resolve in **`DECISIONS.md`** (decision index + dated entries). Historical open questions were tracked as `OQ-<n>` — all are resolved; the resolutions are recorded in `DECISIONS.md`.
-- Companion documents: `CONTEXT.md` (glossary — one canonical term per concept), `DECISIONS.md` (decision index + dated log — the home of all D-numbers), `docs/handover/` (one handover per major unit of work), `docs/meeting_minutes/` (archived client meeting outcomes), `docs/superpowers/specs/` (per-phase design docs — the HOW layer), `templates/` (developer-supplied AU template content), `README.md` (navigation hub + how to run).
+- Companion documents: `CONTEXT.md` (glossary — one canonical term per concept), `DECISIONS.md` (decision index + dated log — the home of all D-numbers), `docs/design/` (technical design layer — the cross-phase HOW overview: architecture · data & memory · workflows, D-28), `docs/handover/` (one handover per major unit of work), `docs/meeting_minutes/` (archived client meeting outcomes), `docs/superpowers/specs/` (per-phase design docs — the detailed HOW record), `templates/` (developer-supplied AU template content), `README.md` (navigation hub + how to run).
 
 ---
 
@@ -283,14 +285,17 @@ Phases group the client minutes' recommended build order (tasks 1–14), each ph
 Delivered: Electron shell, embedded local server, full 13-table SQLite schema, `jobpin-data` scaffold in the user's home folder, Windows NSIS installer. All acceptance criteria verified, including the full packaged-build checklist run by the owner.
 **How it was built lives elsewhere (point, don't restate):** design spec `docs/superpowers/specs/2026-07-10-phase-0-desktop-foundation-design.md` · implementation plan `docs/superpowers/plans/2026-07-10-phase-0-desktop-foundation.md` · handover `docs/handover/2026-07-10-phase-0-desktop-foundation.md`. Decisions: D-21…D-24.
 
-### Phase 1 — Job workspace & candidate intake *(tasks 4–6)*
+### Phase 1 — Job workspace & candidate intake *(tasks 4–6)* — ✅ complete (2026-07-10)
 
-- **Objective:** the boss can create a job and get candidates into it — the non-AI backbone of F1/F2.
-- **Scope:** job creation UI → folder generation per section 8.2 (F1.1–F1.4); JD upload/storage (`jd.md`); resume upload + paste; text extraction to `resume_text.md` (F2.1, F2.2, F2.4); candidate list (unranked). **Out:** analysis, ranking.
-- **Technical approach:** file-first writes with DB index rows (`jobs`, `candidates`, `candidate_documents`); extraction library for PDF/DOCX chosen at design time; extraction failure keeps the original and marks the candidate for boss attention (F2.2).
-- **Dependencies:** Phase 0.
-- **Acceptance criteria:** create "Sales Manager" → exact section 8.2 folder tree exists; upload a PDF resume → original + extracted text stored, candidate visible; paste text → same; a corrupt file leaves the candidate present and flagged, never lost.
-- **Risks:** job-name folders need filesystem-safe naming rules (unicode, duplicates) — design here; extraction quality for image PDFs (defer OCR — post-MVP unless trivially available).
+Delivered: job creation with the full section 8.2 folder skeleton (unicode-safe naming), JD
+upload/paste, resume upload + paste with PDF/DOCX/TXT extraction to `resume_text.md` (failure
+keeps the original and flags the candidate `needs_review`), safe job rename with candidates
+present, unranked candidate list — all through the app's first routed UI, fully offline. All
+acceptance criteria verified, including the owner's manual walk.
+**How it was built lives elsewhere (point, don't restate):** design spec
+`docs/superpowers/specs/2026-07-10-phase-1-job-workspace-design.md` · implementation plan
+`docs/superpowers/plans/2026-07-10-phase-1-job-workspace.md` · handover
+`docs/handover/2026-07-10-phase-1-job-workspace.md`. Decisions: D-26, D-27.
 
 ### Phase 2 — AI analysis & ranking *(tasks 7–8)*
 
