@@ -20,7 +20,11 @@ function loadDevEnv(): Record<string, string | undefined> {
   if (!app.isPackaged && existsSync(envFile)) {
     for (const line of readFileSync(envFile, 'utf8').split(/\r?\n/)) {
       const m = /^([A-Z0-9_]+)\s*=\s*(.*)$/.exec(line.trim())
-      if (m && env[m[1]] === undefined) env[m[1]] = m[2]
+      if (m) {
+        let v = m[2].trim()
+        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1)
+        if (env[m[1]] === undefined) env[m[1]] = v
+      }
     }
   }
   return env

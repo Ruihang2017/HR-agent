@@ -4,6 +4,7 @@ import SystemPage from './pages/SystemPage'
 import JobsPage from './pages/JobsPage'
 import JobDetailPage from './pages/JobDetailPage'
 import CandidatePage from './pages/CandidatePage'
+import SettingsPage from './pages/SettingsPage'
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
           <Route path="/" element={<JobsPage />} />
           <Route path="/jobs/:id" element={<JobDetailPage />} />
           <Route path="/candidates/:id" element={<CandidatePage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="/system" element={<SystemPage />} />
         </Route>
       </Routes>

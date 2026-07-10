@@ -74,7 +74,7 @@ export function registerAiRoutes(app: Hono, deps: { db: DB; paths: JobpinPaths; 
   app.get('/ai/usage', c => {
     const plan = getPlan()
     const used = db.prepare(
-      "SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS n FROM usage_events WHERE created_at >= strftime('%Y-%m-01T00:00:00Z','now')"
+      "SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS n FROM usage_events WHERE substr(created_at, 1, 7) = strftime('%Y-%m','now')"
     ).get() as { n: number }
     return c.json({ plan: plan.label, tier: plan.tier, allowanceTokens: plan.monthlyTokens, usedTokens: used.n, advisory: true })
   })
