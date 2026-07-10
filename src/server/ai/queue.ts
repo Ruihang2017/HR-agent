@@ -58,7 +58,9 @@ export function createQueue(deps: {
   const kick = (): void => {
     while (active < concurrency) {
       active++
-      void loop().finally(() => { active-- })
+      void loop()
+        .catch(err => { console.error('analysis worker crashed:', err) })
+        .finally(() => { active-- })
     }
   }
 
