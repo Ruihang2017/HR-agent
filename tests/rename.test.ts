@@ -63,10 +63,29 @@ describe('renameJob', () => {
     expect(doc.file_path).toMatch(/^jobs\/Beta\//)
   })
 
-  it('name-only change when folder name is unchanged (case-only rename)', () => {
-    const job = createJob({ db, paths }, 'barista')
-    const renamed = renameJob({ db, paths }, job.id, 'barista ') // trims to same folder
-    expect(renamed.name).toBe('barista')
+  it('case-only display-name change keeps the existing folder (no fs rename)', () => {
+    const job = createJob({ db, paths }, 'Barista Trainee')
+    addCandidateRows(job.id, job.folderPath)
+    const renamed = renameJob({ db, paths }, job.id, 'barista trainee')
+    expect(renamed.name).toBe('barista trainee')
+    expect(renamed.folderPath).toBe('jobs/Barista Trainee') // folder untouched
+    expect(fs.existsSync(path.join(tmp, 'jobs', 'Barista Trainee', 'jd.md'))).toBe(true)
+    const doc = db.prepare('SELECT file_path FROM candidate_documents').get() as { file_path: string }
+    expect(doc.file_path).toMatch(/^jobs\/Barista Trainee\//) // paths untouched
+  })
+
+  it('escapes SQL wildcards in folder prefixes so similar jobs are untouched', () => {
+    const wild = createJob({ db, paths }, '50% Sales_Role')
+    addCandidateRows(wild.id, wild.folderPath)
+    const other = createJob({ db, paths }, '50x Sales+Role') // would match an UNESCAPED "jobs/50% Sales_Role/%" LIKE pattern
+    addCandidateRows(other.id, other.folderPath)
+
+    renameJob({ db, paths }, wild.id, 'Half Sales Role')
+
+    const docs = db.prepare('SELECT file_path FROM candidate_documents ORDER BY id').all() as { file_path: string }[]
+    expect(docs[0].file_path).toMatch(/^jobs\/Half Sales Role\/candidates\//)
+    expect(docs[1].file_path).toMatch(/^jobs\/50x Sales\+Role\/candidates\//) // untouched
+    expect(fs.existsSync(path.join(tmp, docs[0].file_path))).toBe(true)
   })
 
   it('rejects duplicate display name', () => {
