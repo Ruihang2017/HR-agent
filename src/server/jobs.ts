@@ -69,6 +69,10 @@ export function createJob(deps: JobsDeps, name: string, jd?: string): JobDetail 
     return getJob(deps, Number(info.lastInsertRowid))
   } catch (e) {
     fs.rmSync(folderAbs, { recursive: true, force: true }) // no half-created jobs
+    // Defense-in-depth: translate a UNIQUE-constraint race into the typed contract.
+    if (e instanceof Error && 'code' in e && (e as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      throw new ConflictError(`a job named "${displayName}" already exists`)
+    }
     throw e
   }
 }
