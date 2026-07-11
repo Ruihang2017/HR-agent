@@ -1,10 +1,26 @@
-import type { Hono } from 'hono'
+import type { Context, Hono } from 'hono'
 import type { DB } from '../db'
 import type { JobpinPaths } from '../paths'
+import { ValidationError } from '../errors'
 import type { Gateway } from './gateway'
 import * as interviews from '../interviews'
 import { generateQuestions, commentOnAnswer, summariseInterview } from './interview-ai'
 import { decideProposal, getJobMemory, starQuestion } from '../memory'
+
+/**
+ * Strict JSON body parsing (same pattern as `POST /jobs/:id/analyses` in ai/routes.ts):
+ * a blank body reads as `{}` so the handler's own missing-field validation applies; a
+ * non-blank unparseable body is a typed 400, never a raw SyntaxError -> 500.
+ */
+async function parseJsonBody<T extends object>(c: Context): Promise<Partial<T>> {
+  const raw = await c.req.text()
+  if (raw.trim().length === 0) return {}
+  try {
+    return JSON.parse(raw) as Partial<T>
+  } catch {
+    throw new ValidationError('request body must be valid JSON')
+  }
+}
 
 export interface InterviewRoutesDeps {
   db: DB
@@ -36,7 +52,7 @@ export function registerInterviewRoutes(app: Hono, deps: InterviewRoutesDeps): v
 
   app.patch('/interviews/:id', async c => {
     const interviewId = Number(c.req.param('id'))
-    const body = (await c.req.json()) as { bossDecision?: string }
+    const body = await parseJsonBody<{ bossDecision: string }>(c)
     interviews.setBossDecision(deps, interviewId, body.bossDecision ?? '')
     return c.json({ interview: interviews.getInterview(deps, interviewId).interview })
   })
@@ -48,7 +64,7 @@ export function registerInterviewRoutes(app: Hono, deps: InterviewRoutesDeps): v
 
   app.post('/interviews/:id/questions', async c => {
     const interviewId = Number(c.req.param('id'))
-    const body = (await c.req.json()) as { text?: string; category?: string }
+    const body = await parseJsonBody<{ text: string; category: string }>(c)
     return c.json(interviews.addQuestion(deps, interviewId, { text: body.text ?? '', category: body.category }), 201)
   })
 
@@ -60,7 +76,7 @@ export function registerInterviewRoutes(app: Hono, deps: InterviewRoutesDeps): v
 
   app.put('/interview-questions/:id/answer', async c => {
     const questionId = Number(c.req.param('id'))
-    const body = (await c.req.json()) as { answerText?: string; bossNote?: string; affectsRanking?: boolean }
+    const body = await parseJsonBody<{ answerText: string; bossNote: string; affectsRanking: boolean }>(c)
     return c.json(interviews.saveAnswer(deps, questionId, body))
   })
 

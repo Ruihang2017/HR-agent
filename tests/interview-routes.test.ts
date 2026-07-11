@@ -254,6 +254,38 @@ describe('GatewayError -> 502', () => {
   })
 })
 
+describe('malformed JSON bodies -> 400, never 500', () => {
+  const notJson = (method: 'POST' | 'PUT' | 'PATCH') => ({
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: '{not json'
+  })
+
+  it('PATCH decision, POST question, and PUT answer all 400 with no rows written', async () => {
+    const { candidateId } = await createJobAndCandidate()
+    const createRes = await app.request(`/candidates/${candidateId}/interviews`, json({}))
+    const { interview } = await createRes.json()
+    const qRes = await app.request(`/interviews/${interview.id}/questions`, json({ text: 'How do you handle conflict?' }))
+    const question = await qRes.json()
+
+    const patchRes = await app.request(`/interviews/${interview.id}`, notJson('PATCH'))
+    expect(patchRes.status).toBe(400)
+    expect((await patchRes.json()).error).toBe('request body must be valid JSON')
+    const row = db.prepare('SELECT boss_decision FROM interviews WHERE id = ?').get(interview.id) as { boss_decision: string | null }
+    expect(row.boss_decision).toBeNull()
+
+    const postRes = await app.request(`/interviews/${interview.id}/questions`, notJson('POST'))
+    expect(postRes.status).toBe(400)
+    const count = db.prepare('SELECT COUNT(*) AS n FROM interview_questions WHERE interview_id = ?').get(interview.id) as { n: number }
+    expect(count.n).toBe(1) // only the well-formed question above
+
+    const putRes = await app.request(`/interview-questions/${question.id}/answer`, notJson('PUT'))
+    expect(putRes.status).toBe(400)
+    const answers = db.prepare('SELECT COUNT(*) AS n FROM interview_answers WHERE interview_question_id = ?').get(question.id) as { n: number }
+    expect(answers.n).toBe(0)
+  })
+})
+
 describe('404s for unknown ids', () => {
   it('every :id route 404s on an unknown id', async () => {
     expect((await app.request('/candidates/999/interviews', json({}))).status).toBe(404)
