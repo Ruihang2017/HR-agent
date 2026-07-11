@@ -384,7 +384,16 @@ export async function summariseInterview(
     schemaName: 'interview_summary', jsonSchema: INTERVIEW_SUMMARY_JSON_SCHEMA, zodSchema: InterviewSummaryOutput,
     kind: 'interview_summary', jobId: job.id, candidateId: cand.id
   })
-  const out = result.output
+  // I-2 fix: code-enforce acceptance 12.3 - a summary must never carry a ranking factor when
+  // nothing on the round was flagged, regardless of what the model returned (prompt-trusted
+  // was not enough). Checked against the same `items` used to build the prompt, matching the
+  // local shape (`i.answer?.affectsRanking`). Mutate a copy, never `result.output` itself, so
+  // every downstream read (persistence, md render, ai_score, the returned output) sees one
+  // consistent enforced value.
+  const noneFlagged = !items.some(i => i.answer?.affectsRanking)
+  const out: InterviewSummaryOutputT = noneFlagged && result.output.interview_performance
+    ? { ...result.output, interview_performance: null }
+    : result.output
 
   const candFolder = candidateFolderFor(db, cand.id)
   // interviewId + stage make the output file self-describing: downstream consumers

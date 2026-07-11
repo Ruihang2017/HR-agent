@@ -218,6 +218,50 @@ describe('starring, memory decisions, and job memory read', () => {
   })
 })
 
+describe('GET /interviews/:id/summary', () => {
+  it('404 before a summary exists; returns the stored narrative + pending proposals after POST; re-summary returns the newest', async () => {
+    const { candidateId } = await createJobAndCandidate()
+    const createRes = await app.request(`/candidates/${candidateId}/interviews`, json({}))
+    const { interview } = await createRes.json()
+
+    const beforeRes = await app.request(`/interviews/${interview.id}/summary`)
+    expect(beforeRes.status).toBe(404)
+
+    const qRes = await app.request(`/interviews/${interview.id}/questions`, json({ text: 'How do you handle conflict?' }))
+    const question = await qRes.json()
+    await app.request(
+      `/interview-questions/${question.id}/answer`,
+      json({ answerText: 'I ran the weekend schedule myself for two years.', affectsRanking: true }, 'PUT')
+    )
+
+    const postRes = await app.request(`/interviews/${interview.id}/summary`, json({}))
+    const postBody = await postRes.json()
+
+    const getRes = await app.request(`/interviews/${interview.id}/summary`)
+    expect(getRes.status).toBe(200)
+    const getBody = await getRes.json()
+    expect(getBody.analysisId).toBe(postBody.analysisId)
+    expect(getBody.output.summary).toBe(validSummaryFixture().summary)
+    expect(Array.isArray(getBody.proposals)).toBe(true)
+    expect(getBody.proposals.length).toBeGreaterThan(0)
+    expect(getBody.proposals.every((p: { status: string }) => p.status === 'pending')).toBe(true)
+
+    // re-summary: the newest row is now returned by the GET
+    const secondPostRes = await app.request(`/interviews/${interview.id}/summary`, json({}))
+    const secondPostBody = await secondPostRes.json()
+    expect(secondPostBody.analysisId).not.toBe(postBody.analysisId)
+
+    const getAfterSecondRes = await app.request(`/interviews/${interview.id}/summary`)
+    const getAfterSecondBody = await getAfterSecondRes.json()
+    expect(getAfterSecondBody.analysisId).toBe(secondPostBody.analysisId)
+  })
+
+  it('404 for an unknown interview', async () => {
+    const res = await app.request('/interviews/999/summary')
+    expect(res.status).toBe(404)
+  })
+})
+
 describe('manual question add', () => {
   it('201 with source manual; 400 on blank text', async () => {
     const { candidateId } = await createJobAndCandidate()
@@ -298,6 +342,7 @@ describe('404s for unknown ids', () => {
     expect((await app.request('/interview-questions/999/answer', json({ answerText: 'x' }, 'PUT'))).status).toBe(404)
     expect((await app.request('/interview-questions/999/ai-comment', json({}))).status).toBe(404)
     expect((await app.request('/interviews/999/summary', json({}))).status).toBe(404)
+    expect((await app.request('/interviews/999/summary')).status).toBe(404)
     expect((await app.request('/memory-events/999/approve', json({}))).status).toBe(404)
     expect((await app.request('/memory-events/999/reject', json({}))).status).toBe(404)
     expect((await app.request('/jobs/999/memory')).status).toBe(404)

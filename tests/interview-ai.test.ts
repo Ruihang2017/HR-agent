@@ -421,6 +421,31 @@ describe('summariseInterview', () => {
     expect(all.filter(r => r.status === 'rejected')).toHaveLength(2)
   })
 
+  it('I-2: code-enforces the no-ranking-factor invariant even when the model returns a non-null factor with nothing flagged', async () => {
+    const c = await addCandidateFromText({ db, paths }, jobId, 'Pat', 'Ten years of sales.')
+    const interview = createInterview(interviewDeps, c.id)
+    const q1 = addQuestion(interviewDeps, interview.id, { text: 'How do you handle conflict?', category: 'standard' })
+    saveAnswer(interviewDeps, q1.id, { answerText: 'I ran the weekend schedule myself for two years.' }) // affectsRanking left false
+    nextOutput = validSummaryFixture() // interview_performance is non-null, but nothing on the round is flagged
+
+    const result = await summariseInterview(deps, interview.id)
+    expect(result.output.interview_performance).toBeNull()
+
+    const row = db
+      .prepare('SELECT summary_path, ai_score FROM interviews WHERE id = ?')
+      .get(interview.id) as { summary_path: string; ai_score: number | null }
+    expect(row.ai_score).toBeNull()
+
+    const md = fs.readFileSync(path.join(tmp, row.summary_path), 'utf8')
+    expect(md).toContain('no items were flagged — no ranking factor')
+
+    const analysisRow = db
+      .prepare("SELECT output_path FROM ai_analyses WHERE candidate_id = ? AND kind = 'interview_summary'")
+      .get(c.id) as { output_path: string }
+    const persisted = JSON.parse(fs.readFileSync(path.join(tmp, analysisRow.output_path), 'utf8')) as { interview_performance: unknown }
+    expect(persisted.interview_performance).toBeNull()
+  })
+
   it('rejects with ConflictError when zero items have been answered', async () => {
     const c = await addCandidateFromText({ db, paths }, jobId, 'Pat', 'Ten years of sales.')
     const interview = createInterview(interviewDeps, c.id)

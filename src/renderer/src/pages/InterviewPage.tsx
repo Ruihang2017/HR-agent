@@ -43,7 +43,7 @@ interface SummaryOutput {
   memory_proposals: { lesson: string; evidence: Evidence[] }[]
 }
 interface Proposal { id: number; status: string; lesson: string; evidence: Evidence[]; refusalReason?: string }
-interface SummaryResp { analysisId: number; output: SummaryOutput; proposals: Proposal[] }
+interface SummaryResp { analysisId: number; createdAt?: string; output: SummaryOutput; proposals: Proposal[] }
 interface GenerateResult { added: number; dropped: { text: string; terms: string[] }[] }
 
 const CATEGORIES = ['standard', 'resume_specific', 'jd_risk', 'boss_favourite', 'follow_up'] as const
@@ -70,6 +70,24 @@ const primaryBtn: CSSProperties = {
 const inputStyle: CSSProperties = {
   border: '1px solid var(--c-border)', borderRadius: 'var(--radius-sm)', padding: 'var(--sp-2)',
   width: '100%', background: 'var(--c-surface)', color: 'var(--c-text)'
+}
+
+/** Same evidence + confidence-chip pattern as CandidatePage's DimensionCard (I-1). */
+function DimensionCard({ label, judgment }: { label: string; judgment: InterviewJudgment }) {
+  return (
+    <div style={{ border: '1px solid var(--c-border)', borderRadius: 'var(--radius-sm)', padding: 'var(--sp-3)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 'var(--sp-2)' }}>
+        <strong>{label}</strong>
+        <StatusBadge status={judgment.confidence} tone={CONFIDENCE_TONE[judgment.confidence]} />
+      </div>
+      <p style={{ margin: 'var(--sp-2) 0' }}>{judgment.assessment}</p>
+      <ul style={{ margin: 0, paddingLeft: 'var(--sp-5)', color: 'var(--c-text-2)', fontSize: 'var(--text-sm)' }}>
+        {judgment.evidence.map((e, i) => (
+          <li key={i}>“{e.quote}” <span style={{ fontSize: 'var(--text-xs)' }}>[{e.source}]</span></li>
+        ))}
+      </ul>
+    </div>
+  )
 }
 
 export default function InterviewPage() {
@@ -137,6 +155,17 @@ export default function InterviewPage() {
       })
       .catch(() => {})
   }, [detail?.interview.candidateId])
+
+  // I-3: a round that already has a stored summary re-renders the SAME summary panel from
+  // the stored payload on load, instead of making the boss re-click "Summarise" just to see
+  // the narrative again. Guarded on `!summary` so this never clobbers a summary that a
+  // fresh POST (below) just set in state.
+  useEffect(() => {
+    if (!detail || summary || !detail.interview.summaryPath) return
+    apiJson<SummaryResp>(`/interviews/${interviewId}/summary`)
+      .then(setSummary)
+      .catch(() => {}) // best-effort - the "not summarised yet" / loading copy already covers absence
+  }, [detail, interviewId, summary])
 
   async function saveBossDecision() {
     if (!detail) return
@@ -402,48 +431,44 @@ export default function InterviewPage() {
       </div>
 
       <div style={card}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-3)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2 style={{ margin: 0, fontSize: 'var(--text-lg)' }}>Summary</h2>
           <button disabled={!hasAnyAnswer || summaryBusy} onClick={summarise}
             style={{ ...primaryBtn, opacity: !hasAnyAnswer || summaryBusy ? 0.5 : 1 }}>
-            {summaryBusy ? 'Summarising…' : 'Summarise interview'}
+            {summaryBusy ? 'Summarising…' : interview.summaryPath ? 'Re-summarise' : 'Summarise interview'}
           </button>
         </div>
+        {interview.summaryPath && (
+          <p style={{ color: 'var(--c-text-2)', fontSize: 'var(--text-xs)', textAlign: 'right', margin: 'var(--sp-1) 0 0' }}>
+            Makes a new AI call and replaces any undecided proposals from the previous summary.
+          </p>
+        )}
 
         {summaryError && (
-          <p style={{ color: 'var(--c-danger)', display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+          <p style={{ color: 'var(--c-danger)', display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', margin: 'var(--sp-3) 0 0' }}>
             {summaryError}
             <button onClick={summarise} style={actionBtn}>Retry</button>
           </p>
         )}
 
         {!summary && interview.summaryPath && (
-          <p style={{ color: 'var(--c-text-2)', margin: 0 }}>
-            Already summarised (AI score {interview.aiScore ?? '—'}). Click "Summarise interview" to view the narrative again.
-          </p>
+          <p style={{ color: 'var(--c-text-2)', margin: 'var(--sp-3) 0 0' }}>Loading stored summary…</p>
         )}
         {!summary && !interview.summaryPath && !summaryError && (
-          <p style={{ color: 'var(--c-text-2)', margin: 0 }}>Not summarised yet.</p>
+          <p style={{ color: 'var(--c-text-2)', margin: 'var(--sp-3) 0 0' }}>Not summarised yet.</p>
         )}
 
         {summary && (
-          <div>
+          <div style={{ marginTop: 'var(--sp-3)' }}>
             <p>{summary.output.summary}</p>
 
-            <h3 style={{ fontSize: 'var(--text-md)', margin: '0 0 var(--sp-2)' }}>Soft skills</h3>
-            <p>{summary.output.soft_skill_observations.assessment}</p>
-
-            <h3 style={{ fontSize: 'var(--text-md)', margin: '0 0 var(--sp-2)' }}>Stability</h3>
-            <p>{summary.output.stability_inference.assessment}</p>
-
-            {summary.output.risk_points.length > 0 && (
-              <>
-                <h3 style={{ fontSize: 'var(--text-md)', margin: '0 0 var(--sp-2)' }}>Risk points</h3>
-                <ul style={{ marginTop: 0 }}>
-                  {summary.output.risk_points.map((r, i) => <li key={i}>{r.assessment}</li>)}
-                </ul>
-              </>
-            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', margin: 'var(--sp-3) 0' }}>
+              <DimensionCard label="Soft skills" judgment={summary.output.soft_skill_observations} />
+              <DimensionCard label="Stability" judgment={summary.output.stability_inference} />
+              {summary.output.risk_points.map((r, i) => (
+                <DimensionCard key={`risk-${i}`} label={`Risk point ${i + 1}`} judgment={r} />
+              ))}
+            </div>
 
             {summary.output.recommended_follow_ups.length > 0 && (
               <>
@@ -463,15 +488,22 @@ export default function InterviewPage() {
 
             <h3 style={{ fontSize: 'var(--text-md)', margin: '0 0 var(--sp-2)' }}>Interview performance</h3>
             {summary.output.interview_performance ? (
-              <>
-                <p style={{ fontSize: 'var(--text-lg)', fontWeight: 700, margin: '0 0 var(--sp-1)' }}>
-                  {summary.output.interview_performance.score}
-                </p>
-                <p style={{ margin: '0 0 var(--sp-1)' }}>{summary.output.interview_performance.reason}</p>
-                <p style={{ color: 'var(--c-text-2)', fontSize: 'var(--text-sm)' }}>
+              <div style={{ border: '1px solid var(--c-border)', borderRadius: 'var(--radius-sm)', padding: 'var(--sp-3)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 'var(--sp-2)' }}>
+                  <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700 }}>{summary.output.interview_performance.score}</span>
+                  <StatusBadge status={summary.output.interview_performance.confidence}
+                    tone={CONFIDENCE_TONE[summary.output.interview_performance.confidence]} />
+                </div>
+                <p style={{ margin: 'var(--sp-2) 0' }}>{summary.output.interview_performance.reason}</p>
+                <ul style={{ margin: '0 0 var(--sp-2)', paddingLeft: 'var(--sp-5)', color: 'var(--c-text-2)', fontSize: 'var(--text-sm)' }}>
+                  {summary.output.interview_performance.evidence.map((e, i) => (
+                    <li key={i}>“{e.quote}” <span style={{ fontSize: 'var(--text-xs)' }}>[{e.source}]</span></li>
+                  ))}
+                </ul>
+                <p style={{ color: 'var(--c-text-2)', fontSize: 'var(--text-sm)', margin: 0 }}>
                   from {items.filter(i => i.answer?.affectsRanking).length} flagged item(s)
                 </p>
-              </>
+              </div>
             ) : (
               <p style={{ color: 'var(--c-text-2)' }}>no items flagged — no ranking factor</p>
             )}

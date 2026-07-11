@@ -1,7 +1,9 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Context, Hono } from 'hono'
 import type { DB } from '../db'
 import type { JobpinPaths } from '../paths'
-import { ValidationError } from '../errors'
+import { NotFoundError, ValidationError } from '../errors'
 import type { Gateway } from './gateway'
 import * as interviews from '../interviews'
 import { generateQuestions, commentOnAnswer, summariseInterview } from './interview-ai'
@@ -88,6 +90,57 @@ export function registerInterviewRoutes(app: Hono, deps: InterviewRoutesDeps): v
   app.post('/interviews/:id/summary', async c => {
     const interviewId = Number(c.req.param('id'))
     return c.json(await summariseInterview(deps, interviewId))
+  })
+
+  /**
+   * The stored-summary read (I-3): lets the UI re-render the last narrative on page load
+   * without re-calling the model. 404s if the interview is unknown or has never been
+   * summarised (`summary_path` still null). The candidate's `interview_summary` rows are
+   * self-describing (each embeds the `interviewId` it belongs to - see interview-ai.ts),
+   * so a candidate with multiple interview rounds still resolves to the right one: newest
+   * row first, first one whose embedded id matches wins. Rows written before that field
+   * existed have no `interviewId` at all; since this interview's `summary_path` is already
+   * known non-null, the newest such legacy row is the best available match.
+   */
+  app.get('/interviews/:id/summary', c => {
+    const interviewId = Number(c.req.param('id'))
+    const { interview } = interviews.getInterview(deps, interviewId) // 404s if the interview is unknown
+    if (interview.summaryPath === null) throw new NotFoundError(`interview ${interviewId} has no summary yet`)
+
+    const rows = deps.db
+      .prepare(
+        `SELECT id, created_at AS createdAt, output_path AS outputPath
+         FROM ai_analyses WHERE candidate_id = ? AND kind = 'interview_summary' AND output_path != ''
+         ORDER BY id DESC`
+      )
+      .all(interview.candidateId) as { id: number; createdAt: string; outputPath: string }[]
+
+    const parsed = rows
+      .filter(r => existsSync(join(deps.paths.dataRoot, r.outputPath)))
+      .map(r => ({
+        id: r.id,
+        createdAt: r.createdAt,
+        output: JSON.parse(readFileSync(join(deps.paths.dataRoot, r.outputPath), 'utf8')) as { interviewId?: number }
+      }))
+
+    const match =
+      parsed.find(r => r.output.interviewId === interviewId) ??
+      parsed.find(r => r.output.interviewId === undefined)
+    if (!match) throw new NotFoundError(`no summary output found for interview ${interviewId}`)
+
+    const proposalRows = deps.db
+      .prepare(
+        `SELECT id, content FROM memory_events
+         WHERE source_type = 'interview' AND source_id = ? AND status = 'pending'
+         ORDER BY id ASC`
+      )
+      .all(interviewId) as { id: number; content: string }[]
+    const proposals = proposalRows.map(p => {
+      const content = JSON.parse(p.content) as { lesson: string; evidence: { quote: string; source: string }[] }
+      return { id: p.id, status: 'pending' as const, lesson: content.lesson, evidence: content.evidence }
+    })
+
+    return c.json({ analysisId: match.id, createdAt: match.createdAt, output: match.output, proposals })
   })
 
   app.post('/memory-events/:id/approve', c => {
