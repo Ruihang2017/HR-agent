@@ -23,7 +23,7 @@ afterEach(() => {
 })
 
 describe('createApp', () => {
-  it('GET /health reports ok, schema version and data dir', async () => {
+  it('GET /health reports ok, schema version, data dir and encryption:unavailable when keyless', async () => {
     const app = createApp({ db, paths: getPaths(tmp), version: '0.1.0' })
     const res = await app.request('/health')
     expect(res.status).toBe(200)
@@ -32,6 +32,14 @@ describe('createApp', () => {
     expect(body.schemaVersion).toBe(3)
     expect(body.dataDir).toBe(tmp)
     expect(typeof body.uptimeSeconds).toBe('number')
+    expect(body.encryption).toBe('unavailable')
+  })
+
+  it('GET /health reports encryption:on when a data key is threaded through', async () => {
+    const app = createApp({ db, paths: getPaths(tmp), version: '0.1.0', dataKey: Buffer.alloc(32, 1) })
+    const res = await app.request('/health')
+    const body = await res.json()
+    expect(body.encryption).toBe('on')
   })
 
   it('GET /version reports app name and version', async () => {

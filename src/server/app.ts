@@ -31,7 +31,10 @@ export function createApp({ db, paths, version, ai, dataKey }: AppDeps): Hono {
       status: 'ok',
       schemaVersion: getSchemaVersion(db),
       dataDir: paths.dataRoot,
-      uptimeSeconds: Math.round((Date.now() - startedAt) / 1000)
+      uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
+      // 'on' once a data key is threaded through; 'unavailable' when safeStorage has no
+      // OS keychain to wrap it with (see main/key-provider.ts) - drives the Settings card.
+      encryption: dataKey ? 'on' : 'unavailable'
     })
   )
 

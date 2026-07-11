@@ -5,9 +5,11 @@ import { getPaths } from '../server/paths'
 import { ensureScaffold } from '../server/scaffold'
 import { openDatabase, runMigrations } from '../server/db'
 import { migrations } from '../server/migrations'
+import { sweepCandidateFiles } from '../server/data-migrations'
 import { createApp } from '../server/app'
 import { startServer } from '../server/serve'
 import { registerIpc } from './ipc'
+import { getOrCreateDataKey } from './key-provider'
 import { DevTokenIssuer } from '../server/ai/subscription'
 import { createAiRuntime } from '../server/ai/runtime'
 
@@ -70,13 +72,28 @@ if (!gotLock) {
       const paths = getPaths()
       ensureScaffold(paths, { emailTemplatesSrc: path.join(__dirname, '../../templates/au/emails') })
 
-      // Step 4: open DB, apply migrations.
-      const db = openDatabase(paths.dbFile)
+      // Step 4: data key (safeStorage-wrapped), then open DB keyed with it, apply migrations.
+      // `dataKey` is null when safeStorage has no OS keychain to wrap it with - Jobpin then
+      // runs keyless (unchanged pre-encryption behaviour) and reports this via /health.
+      const dataKey = getOrCreateDataKey(paths.dataRoot)
+      const db = openDatabase(paths.dbFile, dataKey ?? undefined)
       runMigrations(db, migrations)
 
+      // First-boot (and resumable) candidate-file encryption sweep: only runs once a
+      // data key exists, and only touches files still plaintext (idempotent by construction).
+      if (dataKey) {
+        const { encrypted, skipped } = sweepCandidateFiles({ db, paths, dataKey })
+        console.log(`candidate-file sweep: ${encrypted} file(s) encrypted, ${skipped} already encrypted`)
+      } else {
+        console.warn(
+          'safeStorage encryption is unavailable on this system - Jobpin is running WITHOUT ' +
+            'at-rest encryption for the database and candidate files.'
+        )
+      }
+
       // Step 5: start the localhost server on an OS-assigned port.
-      const ai = createAiRuntime({ db, paths, issuer: new DevTokenIssuer(loadDevEnv()) })
-      const honoApp = createApp({ db, paths, version: app.getVersion(), ai })
+      const ai = createAiRuntime({ db, paths, issuer: new DevTokenIssuer(loadDevEnv()), dataKey: dataKey ?? undefined })
+      const honoApp = createApp({ db, paths, version: app.getVersion(), ai, dataKey: dataKey ?? undefined })
       const { port } = await startServer(honoApp)
 
       // Boot recovery: any task left 'running' from a previous crash/kill is
