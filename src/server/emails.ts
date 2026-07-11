@@ -151,10 +151,10 @@ export function renderEmail(
 
 /**
  * Renders and persists an email under the candidate's folder, then records it in `emails`.
- * File write happens first (plain fs for now - Task 6 reroutes through candidate-fs), row
- * insert second referencing the written path, mirroring the write-order convention in
- * candidates.ts's persistCandidate: on a post-write failure the partial file is removed and
- * the throw rolls back the transaction.
+ * File write happens first (through the candidate-fs seam - encrypted when a data key is
+ * present), row insert second referencing the written path, mirroring the write-order
+ * convention in candidates.ts's persistCandidate: on a post-write failure the partial file
+ * is removed and the throw rolls back the transaction.
  */
 export function saveEmail(
   deps: EmailDeps,

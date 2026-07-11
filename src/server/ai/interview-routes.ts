@@ -1,5 +1,3 @@
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import type { Hono } from 'hono'
 import type { DB } from '../db'
 import type { JobpinPaths } from '../paths'
@@ -9,6 +7,7 @@ import type { Gateway } from './gateway'
 import * as interviews from '../interviews'
 import { generateQuestions, commentOnAnswer, summariseInterview } from './interview-ai'
 import { decideProposal, getJobMemory, starQuestion } from '../memory'
+import { existsCandidateFile, readCandidateFileText } from '../candidate-fs'
 
 export interface InterviewRoutesDeps {
   db: DB
@@ -103,11 +102,11 @@ export function registerInterviewRoutes(app: Hono, deps: InterviewRoutesDeps): v
       .all(interview.candidateId) as { id: number; createdAt: string; outputPath: string }[]
 
     const parsed = rows
-      .filter(r => existsSync(join(deps.paths.dataRoot, r.outputPath)))
+      .filter(r => existsCandidateFile(deps, r.outputPath))
       .map(r => ({
         id: r.id,
         createdAt: r.createdAt,
-        output: JSON.parse(readFileSync(join(deps.paths.dataRoot, r.outputPath), 'utf8')) as { interviewId?: number }
+        output: JSON.parse(readCandidateFileText(deps, r.outputPath)) as { interviewId?: number }
       }))
 
     const match =

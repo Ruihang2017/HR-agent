@@ -24,9 +24,9 @@ export interface AnalysisQueue {
 
 export function createQueue(deps: {
   db: DB; paths: JobpinPaths; gateway: Pick<Gateway, 'complete'>
-  analyze?: typeof realAnalyze; concurrency?: number
+  dataKey?: Buffer; analyze?: typeof realAnalyze; concurrency?: number
 }): AnalysisQueue {
-  const { db, paths, gateway } = deps
+  const { db, paths, gateway, dataKey } = deps
   const analyze = deps.analyze ?? realAnalyze
   const concurrency = deps.concurrency ?? 2
   let active = 0
@@ -48,7 +48,7 @@ export function createQueue(deps: {
       const task = claim()
       if (!task) return
       try {
-        await analyze({ db, paths, gateway }, task.candidate_id)
+        await analyze({ db, paths, gateway, dataKey }, task.candidate_id)
         finish.run('succeeded', null, task.id)
       } catch (e) {
         const msg = e instanceof GatewayError ? `${e.code}: ${e.message}` : `error: ${(e as Error).message}`

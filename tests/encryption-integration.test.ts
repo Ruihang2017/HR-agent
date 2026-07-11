@@ -12,6 +12,10 @@ import { addCandidateFromText, getCandidate } from '../src/server/candidates'
 import { analyzeCandidate, type AnalyzeDeps } from '../src/server/ai/analyze'
 import { generateQuestions, summariseInterview, type InterviewAiDeps } from '../src/server/ai/interview-ai'
 import type { Gateway } from '../src/server/ai/gateway'
+import { createQueue } from '../src/server/ai/queue'
+import { createAiRuntime } from '../src/server/ai/runtime'
+import { DevTokenIssuer } from '../src/server/ai/subscription'
+import { createApp } from '../src/server/app'
 import { createInterview, addQuestion, saveAnswer, type InterviewDeps } from '../src/server/interviews'
 import { runRanking } from '../src/server/ranking'
 import { saveEmail, getEmail, type EmailDeps } from '../src/server/emails'
@@ -170,5 +174,105 @@ describe('candidate-tree encryption end-to-end (keyed deps)', () => {
 
     const detail = getCandidate({ db, paths, dataKey: key }, legacy.id)
     expect(detail.extractedText).toBe('Five years of legacy sales.')
+  })
+
+  it('an analysis run THROUGH THE QUEUE (the production path) writes its output files encrypted', async () => {
+    const c = await addCandidateFromText({ db, paths, dataKey: key }, jobId, 'Pat', 'Ten years of sales.')
+    const queue = createQueue({
+      db, paths, dataKey: key,
+      gateway: {
+        complete: (async () => ({
+          output: validAnalysisFixture(),
+          provider: 'openai', model: 'gpt-5-mini', usage: { prompt: 1, completion: 1 }
+        })) as Pick<Gateway, 'complete'>['complete']
+      }
+    })
+    const { enqueued } = queue.enqueueAnalyses(jobId, [c.id])
+    expect(enqueued).toHaveLength(1)
+    await queue.idle()
+
+    const task = queue.listForJob(jobId).find(t => t.id === enqueued[0])!
+    expect(task.status).toBe('succeeded')
+
+    const row = db
+      .prepare("SELECT output_path FROM ai_analyses WHERE candidate_id = ? AND kind = 'candidate_analysis'")
+      .get(c.id) as { output_path: string }
+    expect(isJpe1(row.output_path)).toBe(true)
+    expect(isJpe1(`${jobFolder}/candidates/candidate_${c.id}/ai_analysis.json`)).toBe(true)
+  })
+})
+
+describe('keyed routes end-to-end (createApp with dataKey)', () => {
+  const json = (body: unknown) => ({
+    method: 'POST' as const,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+
+  const openaiBody = (content: string) =>
+    JSON.stringify({ choices: [{ message: { content } }], usage: { prompt_tokens: 1, completion_tokens: 1 } })
+
+  function makeKeyedApp(fetchFn?: typeof fetch) {
+    const ai = createAiRuntime({
+      db, paths, issuer: new DevTokenIssuer({ OPENAI_API_KEY: 'sk-test' }), fetchFn, dataKey: key
+    })
+    return { app: createApp({ db, paths, version: '0.1.0', ai, dataKey: key }), queue: ai.queue }
+  }
+
+  it('POST /jobs/:id/analyses through the real runtime encrypts on disk; GET /candidates/:id/analysis decrypts', async () => {
+    const fetchFn = (async () =>
+      new Response(openaiBody(JSON.stringify(validAnalysisFixture())), { status: 200 })) as typeof fetch
+    const { app, queue } = makeKeyedApp(fetchFn)
+
+    const candRes = await app.request(`/jobs/${jobId}/candidates`, json({ name: 'Pat', text: 'Ten years of sales.' }))
+    const { id: candidateId } = await candRes.json()
+
+    const enq = await app.request(`/jobs/${jobId}/analyses`, json({}))
+    expect(enq.status).toBe(202)
+    await queue.idle()
+
+    // The file the production queue path just wrote must be encrypted on disk.
+    const row = db
+      .prepare("SELECT output_path FROM ai_analyses WHERE candidate_id = ? AND kind = 'candidate_analysis'")
+      .get(candidateId) as { output_path: string }
+    expect(isJpe1(row.output_path)).toBe(true)
+
+    // And the read endpoint must decrypt it, not choke on ciphertext.
+    const res = await app.request(`/candidates/${candidateId}/analysis`)
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.output.summary).toBe(validAnalysisFixture().summary)
+  })
+
+  it('GET /interviews/:id/summary decrypts the stored summary output', async () => {
+    const c = await addCandidateFromText({ db, paths, dataKey: key }, jobId, 'Pat', 'Ten years of sales.')
+    const interviewDeps: InterviewDeps = { db, paths, dataKey: key }
+    const interview = createInterview(interviewDeps, c.id)
+    const q = addQuestion(interviewDeps, interview.id, { text: 'Tell me about yourself.' })
+    saveAnswer(interviewDeps, q.id, { answerText: 'Ten years in retail.', affectsRanking: true })
+
+    const aiDeps: InterviewAiDeps = {
+      db, paths, dataKey: key,
+      gateway: {
+        complete: (async () => ({
+          output: validSummaryFixture(),
+          provider: 'openai', model: 'gpt-5-mini', usage: { prompt: 1, completion: 1 }
+        })) as Pick<Gateway, 'complete'>['complete']
+      }
+    }
+    await summariseInterview(aiDeps, interview.id)
+
+    // Sanity: the versioned summary output the route will read is encrypted on disk.
+    const analysisRow = db
+      .prepare("SELECT output_path FROM ai_analyses WHERE candidate_id = ? AND kind = 'interview_summary'")
+      .get(c.id) as { output_path: string }
+    expect(isJpe1(analysisRow.output_path)).toBe(true)
+
+    const { app } = makeKeyedApp()
+    const res = await app.request(`/interviews/${interview.id}/summary`)
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.output.summary).toBe(validSummaryFixture().summary)
+    expect(body.output.interviewId).toBe(interview.id)
   })
 })
