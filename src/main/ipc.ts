@@ -1,9 +1,8 @@
 import { app, dialog, ipcMain, shell } from 'electron'
-import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { resolveContainedPath } from './contained-path'
-import { assertValidRestoreTree, createBackup, extractBackupTo, readBackup, restoreSwap } from '../server/backup'
+import { createBackup, readBackup, stageRestore } from '../server/backup'
 import type { DB } from '../server/db'
 import type { JobpinPaths } from '../server/paths'
 
@@ -76,54 +75,17 @@ export function registerIpc(state: IpcState): void {
     // Throws a clean 'wrong passphrase or corrupt backup' before anything on disk is touched.
     const zipBytes = readBackup(filePaths[0], { passphrase: payload.passphrase })
 
-    const dataRoot = state.paths.dataRoot
-    // Extract into a SIBLING of dataRoot (same volume) so the final rename is an atomic
-    // same-volume move — os.tmpdir() is often a different drive, where renameSync throws EXDEV
-    // (not retried) and would leave dataRoot renamed away with no replacement in place.
-    const tmpExtractDir = `${dataRoot}.restore-tmp-${Date.now()}`
-    fs.rmSync(tmpExtractDir, { recursive: true, force: true }) // clear any leftover from a prior aborted restore
+    // STAGE the restore (extract + validate + write the pending marker) WITHOUT touching the
+    // live data folder or the DB. The actual swap happens at the next launch, in
+    // applyPendingRestore(), before anything opens the DB or the server — that's the only place
+    // it can run on Windows without fighting open file handles on jobpin-data (a bad archive is
+    // rejected here, so we never restart onto nothing). If staging throws, the live app is
+    // untouched and the error surfaces to the renderer.
+    await stageRestore(state.paths.dataRoot, zipBytes)
 
-    let dbClosed = false
-    try {
-      await extractBackupTo(zipBytes, tmpExtractDir)
-
-      // Validate the archive BEFORE closing the live DB: a bad archive is rejected here while the
-      // app is still fully usable, so the boss doesn't have to restart after a failed restore.
-      // (restoreSwap re-validates, harmlessly, as its own first step.)
-      assertValidRestoreTree(tmpExtractDir)
-
-      // Close the live connection BEFORE renaming: on Windows, an open handle on jobpin.db (or
-      // its -wal/-shm siblings) blocks renaming the directory that contains it. Safe here only
-      // because we are seconds from app.exit() — nothing else touches `state.db` again.
-      state.db.close()
-      dbClosed = true
-
-      // Crash-safe swap: validates the tree, renames dataRoot aside, moves the restore in, and
-      // rolls back to the pre-restore copy if that move fails — the boss is never left without a
-      // data folder. Throws (bad archive / double failure) surface to the renderer as an error.
-      restoreSwap(dataRoot, tmpExtractDir)
-    } catch (e) {
-      // Whatever failed, the fully-decrypted extract tree must never survive on disk: it's a
-      // plaintext copy of the whole dataset living OUTSIDE dataRoot, so the boot-time encryption
-      // sweep never reaches it. No-op on the success path (restoreSwap already renamed it away).
-      fs.rmSync(tmpExtractDir, { recursive: true, force: true })
-
-      if (dbClosed) {
-        // The failure happened during/after restoreSwap, with the live DB connection already
-        // closed - restoreSwap's own compensation already put dataRoot back in place (or logged
-        // a loud failure if even that failed), but either way this process cannot keep running
-        // with a dead `state.db` handle. Relaunch onto whatever restoreSwap left in place so the
-        // boss gets a working app instead of one stuck with a closed database.
-        app.relaunch()
-        app.exit(1)
-        return { canceled: false as const } // unreachable once app.exit() runs
-      }
-
-      // Pre-close failure (bad archive, corrupt extract): the live DB was never touched and the
-      // app is still fully usable - surface the error to the renderer instead of restarting.
-      throw e
-    }
-
+    // Close cleanly, then relaunch to apply the staged restore. If relaunch doesn't take on this
+    // platform/run-mode, the marker persists and the restore applies the next time Jobpin opens.
+    state.db.close()
     app.relaunch()
     app.exit(0)
     return { canceled: false as const } // unreachable once app.exit() runs; keeps the handler's type honest

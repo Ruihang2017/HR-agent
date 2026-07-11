@@ -8,6 +8,7 @@ import { migrations } from '../server/migrations'
 import { sweepCandidateFiles } from '../server/data-migrations'
 import { createApp } from '../server/app'
 import { startServer } from '../server/serve'
+import { applyPendingRestore } from '../server/backup'
 import { registerIpc } from './ipc'
 import { getOrCreateDataKey } from './key-provider'
 import { DevTokenIssuer } from '../server/ai/subscription'
@@ -70,6 +71,15 @@ if (!gotLock) {
       // alongside `out/` (see electron-builder.yml's `files:`), so the bundled source sits
       // two levels above this compiled file in both dev (repo root) and packaged (asar root) layouts.
       const paths = getPaths()
+
+      // Apply a restore staged by a previous session (F8.4) BEFORE anything opens the DB, the
+      // server, or the key: at this point nothing holds a handle on jobpin-data, so the directory
+      // swap can't fail the way an in-process swap does. A no-op when no restore is pending.
+      const restored = applyPendingRestore(paths.dataRoot)
+      if (restored.applied) {
+        console.log(`restore applied; your previous data was kept at "${restored.preRestorePath}"`)
+      }
+
       ensureScaffold(paths, { emailTemplatesSrc: path.join(__dirname, '../../templates/au/emails') })
 
       // Step 4: data key (safeStorage-wrapped), then open DB keyed with it, apply migrations.

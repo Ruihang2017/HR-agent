@@ -251,6 +251,65 @@ function safeJoin(destDir: string, entryRelPath: string): string {
   return target
 }
 
+/**
+ * Restore is applied at BOOT, not in the running process (F8.4). Swapping the live data
+ * directory while the app is running is fragile on Windows — the embedded server keeps serving
+ * requests against the closed DB, and renaming a directory whose `jobpin.db-wal`/`-shm` files
+ * still have OS handles fails. Instead the restore handler STAGES the extracted tree and writes
+ * this marker; the next launch applies the swap before anything opens the DB or the server (no
+ * handles, no contention, no server serving a closed connection).
+ */
+export const RESTORE_MARKER = '.jobpin-restore-pending'
+
+/**
+ * Prepares a restore for the NEXT launch: extracts + validates the archive into a same-volume
+ * sibling of `dataRoot`, then writes the marker (next to `dataRoot`) pointing at that staging
+ * dir. Does NOT touch the live data folder or the DB. The caller relaunches after this returns;
+ * `applyPendingRestore` finishes the job at boot.
+ */
+export async function stageRestore(
+  dataRoot: string,
+  zipBytes: Buffer,
+  opts: { nowMs?: number } = {}
+): Promise<string> {
+  const staging = `${dataRoot}.incoming-restore-${opts.nowMs ?? Date.now()}`
+  fs.rmSync(staging, { recursive: true, force: true }) // clear any leftover from a prior aborted attempt
+  await extractBackupTo(zipBytes, staging)
+  assertValidRestoreTree(staging) // reject a non-Jobpin archive before committing to a restart
+  fs.writeFileSync(path.join(path.dirname(dataRoot), RESTORE_MARKER), staging, 'utf8')
+  return staging
+}
+
+/**
+ * At boot, before anything opens the DB or the server: if a restore was staged, swap it into
+ * place. Nothing holds a handle on `dataRoot` at this point, so the rename can't fail on
+ * Windows the way an in-process swap does. Uses the crash-safe `restoreSwap` (validate → rename
+ * live aside → move staging in → compensate on failure). The marker is removed only after a
+ * successful swap; a swap failure removes the marker and rethrows so boot surfaces it (rather
+ * than looping the failure forever) — the original data is intact (compensated back) and the
+ * staged tree is left for manual recovery. Returns whether a restore was applied.
+ */
+export function applyPendingRestore(
+  dataRoot: string,
+  opts: { nowMs?: number; renameFn?: (from: string, to: string) => void } = {}
+): { applied: boolean; preRestorePath?: string } {
+  const marker = path.join(path.dirname(dataRoot), RESTORE_MARKER)
+  if (!fs.existsSync(marker)) return { applied: false }
+  const staging = fs.readFileSync(marker, 'utf8').trim()
+  if (!staging || !fs.existsSync(staging)) {
+    fs.rmSync(marker, { force: true }) // stale/orphaned marker (staging gone) — ignore it
+    return { applied: false }
+  }
+  try {
+    const preRestorePath = restoreSwap(dataRoot, staging, opts)
+    fs.rmSync(marker, { force: true })
+    return { applied: true, preRestorePath }
+  } catch (e) {
+    fs.rmSync(marker, { force: true }) // do not boot-loop the failure; data is intact via compensation
+    throw e
+  }
+}
+
 /** Unzips `zipBytes` into `destDir` (created if missing), preserving the archive's tree. */
 export async function extractBackupTo(zipBytes: Buffer, destDir: string): Promise<void> {
   const zip = await JSZip.loadAsync(zipBytes)

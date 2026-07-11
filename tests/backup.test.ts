@@ -10,7 +10,7 @@ import { openDatabase, runMigrations, type DB } from '../src/server/db'
 import { migrations } from '../src/server/migrations'
 import { createJob } from '../src/server/jobs'
 import { addCandidateFromText } from '../src/server/candidates'
-import { createBackup, readBackup, extractBackupTo, restoreSwap, assertValidRestoreTree } from '../src/server/backup'
+import { createBackup, readBackup, extractBackupTo, restoreSwap, assertValidRestoreTree, stageRestore, applyPendingRestore, RESTORE_MARKER } from '../src/server/backup'
 import { FILE_MAGIC } from '../src/server/cryptx'
 import { rmrfWithRetry } from './helpers'
 
@@ -221,5 +221,74 @@ describe('restoreSwap — crash-safe restore', () => {
     expect(fs.readFileSync(path.join(dataRoot, 'sentinel.txt'), 'utf8')).toBe('ORIGINAL')
     expect(fs.existsSync(`${dataRoot}.pre-restore-7`)).toBe(false) // renamed back, not left behind
     expect(calls).toBe(3) // aside → failed move → compensation
+  })
+})
+
+describe('stageRestore / applyPendingRestore — restore applied at boot, not in-process', () => {
+  // A "backup zip" whose extracted tree is a valid Jobpin data folder (has jobpin.db).
+  async function backupZip(marker: string): Promise<Buffer> {
+    const zip = new JSZip()
+    zip.file('jobpin.db', Buffer.from('RESTORED-DB'))
+    zip.file('sentinel.txt', marker)
+    return zip.generateAsync({ type: 'nodebuffer' })
+  }
+
+  it('stageRestore extracts to a sibling and writes the pending marker without touching dataRoot', async () => {
+    const dataRoot = path.join(outDir, 'live-data')
+    fs.mkdirSync(dataRoot, { recursive: true })
+    fs.writeFileSync(path.join(dataRoot, 'sentinel.txt'), 'ORIGINAL')
+
+    const staging = await stageRestore(dataRoot, await backupZip('FROM-BACKUP'), { nowMs: 5 })
+
+    // Live folder untouched; staging exists as a sibling; marker points at it.
+    expect(fs.readFileSync(path.join(dataRoot, 'sentinel.txt'), 'utf8')).toBe('ORIGINAL')
+    expect(staging).toBe(`${dataRoot}.incoming-restore-5`)
+    expect(fs.existsSync(path.join(staging, 'jobpin.db'))).toBe(true)
+    const marker = path.join(path.dirname(dataRoot), RESTORE_MARKER)
+    expect(fs.readFileSync(marker, 'utf8')).toBe(staging)
+    fs.rmSync(marker, { force: true }) // don't leak into other tests sharing outDir's parent
+  })
+
+  it('stageRestore rejects a non-Jobpin archive (no jobpin.db) and writes no marker', async () => {
+    const dataRoot = path.join(outDir, 'live-data')
+    fs.mkdirSync(dataRoot, { recursive: true })
+    const zip = new JSZip()
+    zip.file('random.txt', 'not a backup')
+    await expect(stageRestore(dataRoot, await zip.generateAsync({ type: 'nodebuffer' }), { nowMs: 5 })).rejects.toThrowError(
+      /missing jobpin\.db/
+    )
+    expect(fs.existsSync(path.join(path.dirname(dataRoot), RESTORE_MARKER))).toBe(false)
+  })
+
+  it('applyPendingRestore swaps the staged tree in, keeps the original as .pre-restore, clears the marker', async () => {
+    const dataRoot = path.join(outDir, 'live-data')
+    fs.mkdirSync(dataRoot, { recursive: true })
+    fs.writeFileSync(path.join(dataRoot, 'sentinel.txt'), 'ORIGINAL')
+    await stageRestore(dataRoot, await backupZip('FROM-BACKUP'), { nowMs: 5 })
+
+    const result = applyPendingRestore(dataRoot, { nowMs: 9 })
+
+    expect(result.applied).toBe(true)
+    expect(fs.readFileSync(path.join(dataRoot, 'sentinel.txt'), 'utf8')).toBe('FROM-BACKUP') // restored
+    expect(fs.readFileSync(path.join(dataRoot, 'jobpin.db'), 'utf8')).toBe('RESTORED-DB')
+    expect(fs.readFileSync(path.join(`${dataRoot}.pre-restore-9`, 'sentinel.txt'), 'utf8')).toBe('ORIGINAL') // kept
+    expect(fs.existsSync(path.join(path.dirname(dataRoot), RESTORE_MARKER))).toBe(false) // cleared
+  })
+
+  it('applyPendingRestore is a no-op when no marker is present', () => {
+    const dataRoot = path.join(outDir, 'live-data')
+    fs.mkdirSync(dataRoot, { recursive: true })
+    fs.writeFileSync(path.join(dataRoot, 'sentinel.txt'), 'ORIGINAL')
+    expect(applyPendingRestore(dataRoot, { nowMs: 9 }).applied).toBe(false)
+    expect(fs.readFileSync(path.join(dataRoot, 'sentinel.txt'), 'utf8')).toBe('ORIGINAL')
+  })
+
+  it('applyPendingRestore ignores a stale marker whose staging dir is gone', () => {
+    const dataRoot = path.join(outDir, 'live-data')
+    fs.mkdirSync(dataRoot, { recursive: true })
+    const marker = path.join(path.dirname(dataRoot), RESTORE_MARKER)
+    fs.writeFileSync(marker, `${dataRoot}.incoming-restore-vanished`, 'utf8') // points nowhere
+    expect(applyPendingRestore(dataRoot, { nowMs: 9 }).applied).toBe(false)
+    expect(fs.existsSync(marker)).toBe(false) // stale marker cleaned up
   })
 })
