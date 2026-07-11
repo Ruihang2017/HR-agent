@@ -43,7 +43,7 @@ export default function ConfirmDeleteModal({
   return (
     <div
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+        position: 'fixed', inset: 0, background: 'var(--c-scrim)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
       }}
       onClick={() => !busy && onClose()}
