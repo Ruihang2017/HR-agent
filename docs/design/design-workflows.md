@@ -152,7 +152,11 @@ AI proposes job-memory updates (with evidence)
 **Open design item flagged early:** which interview items feed the "interview performance"
 ranking factor (the affects-ranking semantics) needs crisp definition at P3 design.
 
-## 5. Communications — Planned (P4), design intent
+## 5. Communications — Designed (P4+5 combined, spec `2026-07-12-phase-4-5-communications-data-protection-design.md`)
+
+> Settled: Handlebars templates seeded from `templates/au/emails/` into boss-editable
+> `company/email_templates/`; six types with per-type declared inputs; copy-to-clipboard, no
+> send affordance of any kind; email files are candidate-tree files (encrypted by Part B).
 
 Choose candidate → pick template type (online/onsite invitation, reschedule, rejection,
 more-materials, onboarding) → render locally with job/candidate variables → save under the
@@ -161,7 +165,14 @@ candidate's `emails/` + `emails` row. **There is no send capability anywhere in 
 confirm-before-send. Engine choice (Handlebars vs md→PDF/DOCX) is a P4 design decision (F6.4).
 Legal/onboarding documents (post-MVP, D-19/F6.3) additionally require human review before use.
 
-## 6. Data protection — Planned (P5), design intent
+## 6. Data protection — Designed (P4+5 combined, spec `2026-07-12-phase-4-5-communications-data-protection-design.md`)
+
+> Settled: whole-DB encryption via the `better-sqlite3-multiple-ciphers` swap + AES-256-GCM
+> candidate-file layer behind one `candidate-fs` seam; safeStorage-wrapped master key inside
+> `jobpin-data/.keys/` (passphrase-upgrade seam documented); deletion = anonymise-in-snapshots
+> for candidates (reason scrubbed, rank/score survive) + full cascade for jobs, both gated by
+> in-transaction maintenance flags so invariant 11.1-5 holds for every other path; backups are
+> passphrase-encrypted portable archives (plain zip only behind an explicit acknowledgement).
 
 Candidate-only encryption at rest (D-17) · one-folder backup/restore (F8.4) · candidate deletion
 (F8.3 — the deliberate, migration-relaxed exception to snapshot immutability) · job deletion
