@@ -1,4 +1,5 @@
-import Database from 'better-sqlite3'
+import Database from 'better-sqlite3-multiple-ciphers'
+import { readFileSync } from 'node:fs'
 
 export type DB = InstanceType<typeof Database>
 
@@ -8,8 +9,45 @@ export interface Migration {
   sql: string
 }
 
-export function openDatabase(dbFile: string): DB {
+/**
+ * Opens the SQLite database file, applying the standard pragmas.
+ *
+ * When `key` (32 raw bytes) is given, the connection is keyed via
+ * `PRAGMA hexkey` — a raw-hex key, applied as the FIRST statement on the
+ * connection, before any other pragma or query (SQLite3MultipleCiphers
+ * requires this ordering). Because `hexkey` only sets the cipher context —
+ * it does not itself verify the key — the very next statement is a probe
+ * read that surfaces a wrong key or an unreadable file immediately instead
+ * of silently returning an empty database.
+ *
+ * If that probe fails, the file is checked for a plaintext SQLite header:
+ *   - plaintext -> one-time in-place upgrade: reopen keyless, `PRAGMA hexrekey`
+ *     to encrypt under the new key, close, then reopen keyed (this recursive
+ *     call takes the normal keyed path above and succeeds).
+ *   - anything else (wrong key, corrupt file) -> throw loudly; never return a
+ *     connection that looks open but is actually unreadable.
+ *
+ * Keyless behaviour (key === undefined) is exactly as before this feature.
+ */
+export function openDatabase(dbFile: string, key?: Buffer): DB {
   const db = new Database(dbFile)
+  if (key) {
+    const hex = key.toString('hex')
+    db.pragma(`hexkey = '${hex}'`) // must be the first statement on this connection
+    try {
+      db.prepare('SELECT count(*) FROM sqlite_master').get()
+    } catch {
+      db.close()
+      const header = readFileSync(dbFile).subarray(0, 16).toString('latin1')
+      if (!header.startsWith('SQLite format 3')) {
+        throw new Error('database is neither readable with the data key nor plaintext - refusing to touch it')
+      }
+      const plain = new Database(dbFile)
+      plain.pragma(`hexrekey = '${hex}'`)
+      plain.close()
+      return openDatabase(dbFile, key) // reopen keyed
+    }
+  }
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
   db.pragma('busy_timeout = 5000')
