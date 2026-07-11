@@ -4,6 +4,7 @@ import * as jobs from './jobs'
 import * as candidates from './candidates'
 import { extractText, extOf } from './extract'
 import { ConflictError, NotFoundError, ValidationError } from './errors'
+import { GatewayError } from './ai/gateway'
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024 // spec section 3: 20 MB → 413
 
@@ -12,6 +13,10 @@ export function registerJobRoutes(app: Hono, deps: JobsDeps): void {
     if (err instanceof ValidationError) return c.json({ error: err.message }, 400)
     if (err instanceof NotFoundError) return c.json({ error: err.message }, 404)
     if (err instanceof ConflictError) return c.json({ error: err.message }, 409)
+    // Direct (non-queued) gateway calls - interview AI pipelines - must not become opaque 500s;
+    // the queue already absorbs GatewayErrors for analysis tasks (Phase 2), so this only fires
+    // for interview routes (design spec section 8).
+    if (err instanceof GatewayError) return c.json({ error: err.message, code: err.code }, 502)
     console.error(err)
     return c.json({ error: 'internal error' }, 500)
   })

@@ -5,6 +5,7 @@ import type { JobpinPaths } from './paths'
 import { registerJobRoutes } from './routes'
 import type { AiRuntime } from './ai/runtime'
 import { registerAiRoutes } from './ai/routes'
+import { registerInterviewRoutes } from './ai/interview-routes'
 
 export interface AppDeps {
   db: DB
@@ -35,6 +36,9 @@ export function createApp({ db, paths, version, ai }: AppDeps): Hono {
   app.get('/version', c => c.json({ app: 'jobpin', version }))
 
   registerJobRoutes(app, { db, paths })
-  if (ai) registerAiRoutes(app, { db, paths, queue: ai.queue })
+  if (ai) {
+    registerAiRoutes(app, { db, paths, queue: ai.queue })
+    registerInterviewRoutes(app, { db, paths, gateway: ai.gateway })
+  }
   return app
 }
