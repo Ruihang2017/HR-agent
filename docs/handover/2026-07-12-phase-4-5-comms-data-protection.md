@@ -91,16 +91,31 @@ passphrase and a genuine app relaunch), and the delete confirmation modals.
 
 ## Verification & results
 
-- `npm test`: **385 passed / 385, 43 test files** (baseline going into this task: 381/42 — the
-  4 new tests are `tests/delete-routes.test.ts`). No flakes observed across the runs in this
-  session.
-- `npm run typecheck`: clean (`tsc --noEmit` on both `tsconfig.node.json` and
-  `tsconfig.web.json`).
-- `git diff --stat 42ef5b2..HEAD` (branch base → this task's HEAD): recorded in
-  `.superpowers/sdd/task-12-report.md`.
-- Manual smoke on an isolated `JOBPIN_DATA_DIR` (never the owner's real `jobpin-data`): see the
-  task report for the exact steps and observations (encryption status, email copy, encrypted
-  backup, candidate delete with snapshot rank/score preserved, job delete).
+- `npm test`: **392 passed / 392, 44 test files** at branch HEAD (`2b029c5`) — confirmatory
+  re-run clean; typecheck clean on both projects.
+- Execution: subagent-driven, 12 tasks, per-task spec+quality reviews. This phase drew an unusual
+  number of reviewer-caught fix loops on **data-loss/security** paths — all fixed and re-verified:
+  the analysis queue never threaded the data key (a keyless worker would crash on encrypted
+  resumes); the boot sweep overwrote candidate files in place (crash = corruption) → temp+rename;
+  deletion missed `usage_events`/`emails`; restore extracted to `os.tmpdir()` with no rollback
+  (cross-volume `EXDEV` → data loss) → same-volume extract + validate + compensating rollback.
+- **Final whole-branch review** returned "ready for owner review" with three Important findings,
+  all fixed in one wave (`2b029c5`) and re-review-confirmed:
+  1. a failed restore left a full **plaintext** copy of the dataset on disk → the restore handler
+     now removes the extract tree on every failure path;
+  2. the app could keep running with a closed DB after a failed restore → relaunch-on-failure;
+  3. **deleted candidates were interactive ghosts, and an in-flight analysis could resurrect a
+     deleted candidate's PII folder** → `status='deleted'` is now filtered in
+     `listCandidates`/`getCandidate` (404)/`runRanking`/`enqueueAnalyses`, and `analyzeCandidate`
+     throws before any gateway call or file write (the resurrection guard), with `saveEmail`/
+     `createInterview` guarded too. A regression test proves zero `ai_analyses` rows and no
+     folder recreation for a mid-flight deletion.
+  Plus a defence-in-depth guard: an empty passphrase can no longer silently produce a plain zip
+  named `.jpbak`.
+- **No live/packaged verification** beyond dev smokes on isolated data dirs: `safeStorage`/DPAPI,
+  the real backup/restore relaunch, and the cipher-fork under a packaged `asarUnpack` install
+  have not run packaged. The owner's acceptance walk — including a real backup → wipe → restore
+  round-trip on a **packaged installer** — is the live gate.
 
 ## Decisions
 
@@ -115,6 +130,12 @@ following the same per-phase pattern as Phases 0-3.
 
 - The passphrase-upgrade seam (D-38: moving `master.key`'s wrapping from DPAPI to a
   scrypt(passphrase) envelope) is documented but intentionally not built.
+- Ride-to-later (final-review triage, all non-blocking): orphan `*.jpenc-tmp` litter is never
+  garbage-collected (harmless ciphertext, excluded from backups); `deleteJob` leaves job-scoped
+  `memory_events` and dangling `usage_events.job_id` (no FK, no resolvable PII); the never-written
+  `documents` table is not purged on `deleteJob` (add a purge if F6.3 ever writes it); a plaintext
+  DB snapshot lives briefly in `%TEMP%` during backup (boss-initiated, `finally`-cleaned except on
+  process kill).
 - `safeStorage.isEncryptionAvailable() === false` and the real Electron backup/restore relaunch
   path are not exercised by the automated suite by construction (`ELECTRON_RUN_AS_NODE=1`); they
   are owner-walk-only, as noted in `key-provider.ts` and this handover.
