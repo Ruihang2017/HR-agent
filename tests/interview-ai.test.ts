@@ -165,6 +165,15 @@ describe('generateQuestions', () => {
     await expect(generateQuestions(deps, 999)).rejects.toThrow(NotFoundError)
   })
 
+  it('guard order: no JD AND no extracted text surfaces the job-level JD error first', async () => {
+    const jobNoJd = createJob({ db, paths }, 'No JD Job')
+    const c = await addCandidateFromFile({ db, paths }, jobNoJd.id, 'corrupt.pdf', read('corrupt.pdf'))
+    expect(c.status).toBe('needs_review')
+    const interview = createInterview(interviewDeps, c.id)
+    await expect(generateQuestions(deps, interview.id)).rejects.toThrow(ValidationError)
+    await expect(generateQuestions(deps, interview.id)).rejects.toThrow(/no JD/)
+  })
+
   it('bank round-trip: an empty bank omits the QUESTION BANK block; a seeded bank includes it', async () => {
     const c1 = await addCandidateFromText({ db, paths }, jobId, 'Pat', 'Ten years of sales.')
     const interview1 = createInterview(interviewDeps, c1.id)

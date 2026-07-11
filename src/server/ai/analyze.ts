@@ -21,12 +21,6 @@ export async function analyzeCandidate(deps: AnalyzeDeps, candidateId: number): 
   if (!cand) throw new NotFoundError(`candidate ${candidateId} not found`)
   const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(cand.job_id) as
     { id: number; name: string; folder_path: string; jd_path: string; inject_path: string }
-  const doc = db.prepare(
-    "SELECT * FROM candidate_documents WHERE candidate_id = ? AND type = 'resume'"
-  ).get(candidateId) as { file_path: string; extracted_text_path: string | null } | undefined
-  if (!doc?.extracted_text_path || !existsSync(abs(doc.extracted_text_path))) {
-    throw new ValidationError('no extracted text - resolve needs_review first')
-  }
 
   // --- assemble materials + provenance manifest ------------------------
   const manifest: ManifestEntry[] = []
@@ -51,10 +45,24 @@ export async function analyzeCandidate(deps: AnalyzeDeps, candidateId: number): 
     manifest.push({ kind: 'preferences', path: rel, chars: text.length })
     return text
   }
+  // Job-level configuration errors surface before candidate-level ones:
+  // a missing JD is fixed once for the whole job.
+  const jd = readRel('jd', job.jd_path) ?? ''
+  if (!jd.trim()) {
+    throw new ValidationError('job has no JD - add a job description before analysing')
+  }
+
+  const doc = db.prepare(
+    "SELECT * FROM candidate_documents WHERE candidate_id = ? AND type = 'resume'"
+  ).get(candidateId) as { file_path: string; extracted_text_path: string | null } | undefined
+  if (!doc?.extracted_text_path || !existsSync(abs(doc.extracted_text_path))) {
+    throw new ValidationError('no extracted text - resolve needs_review first')
+  }
+
   const materials: AnalysisMaterials = {
     jobName: job.name,
     candidateName: cand.name,
-    jd: readRel('jd', job.jd_path) ?? '',
+    jd,
     resumeText: readRel('resume', doc.extracted_text_path) ?? '',
     inject: readRel('inject', job.inject_path),
     values: readRel('values', 'company/values.md'),
@@ -67,9 +75,6 @@ export async function analyzeCandidate(deps: AnalyzeDeps, candidateId: number): 
       .filter(f => f.endsWith('.md'))
       .map(f => ({ name: f, text: readRel(`references/${f}`, `${refsDir}/${f}`) ?? '' }))
       .filter(r => r.text)
-  }
-  if (!materials.jd.trim()) {
-    throw new ValidationError('job has no JD - add a job description before analysing')
   }
 
   // --- model call happens BEFORE any DB write --------------------------

@@ -70,12 +70,6 @@ export async function generateQuestions(
     { id: number; name: string; job_id: number }
   const job = db.prepare('SELECT id, name, folder_path, jd_path FROM jobs WHERE id = ?').get(cand.job_id) as
     { id: number; name: string; folder_path: string; jd_path: string }
-  const doc = db
-    .prepare("SELECT extracted_text_path FROM candidate_documents WHERE candidate_id = ? AND type = 'resume'")
-    .get(cand.id) as { extracted_text_path: string | null } | undefined
-  if (!doc?.extracted_text_path || !existsSync(abs(doc.extracted_text_path))) {
-    throw new ValidationError('no extracted text - resolve needs_review first')
-  }
 
   // --- assemble materials + provenance manifest ------------------------
   const manifest: ManifestEntry[] = []
@@ -87,8 +81,17 @@ export async function generateQuestions(
     return text
   }
 
+  // Job-level configuration errors surface before candidate-level ones:
+  // a missing JD is fixed once for the whole job.
   const jd = readRel('jd', job.jd_path) ?? ''
   if (!jd.trim()) throw new ValidationError('job has no JD - add a job description before analysing')
+
+  const doc = db
+    .prepare("SELECT extracted_text_path FROM candidate_documents WHERE candidate_id = ? AND type = 'resume'")
+    .get(cand.id) as { extracted_text_path: string | null } | undefined
+  if (!doc?.extracted_text_path || !existsSync(abs(doc.extracted_text_path))) {
+    throw new ValidationError('no extracted text - resolve needs_review first')
+  }
   const resumeText = readRel('resume', doc.extracted_text_path) ?? ''
   const learnedSkills = readRel('learned_skills', `${job.folder_path}/learned_skills.md`)
 
