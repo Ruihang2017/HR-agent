@@ -14,6 +14,7 @@ export interface InterviewRoutesDeps {
   db: DB
   paths: JobpinPaths
   gateway: Pick<Gateway, 'complete'>
+  dataKey?: Buffer
 }
 
 /**

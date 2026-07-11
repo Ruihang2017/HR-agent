@@ -1,12 +1,12 @@
-import fs from 'node:fs'
-import path from 'node:path'
 import type { DB } from './db'
 import type { JobpinPaths } from './paths'
 import { NotFoundError, ValidationError } from './errors'
+import { writeCandidateFile } from './candidate-fs'
 
 export interface InterviewDeps {
   db: DB
   paths: JobpinPaths
+  dataKey?: Buffer
 }
 
 /** The five F5.1 categories (design spec section 4). */
@@ -180,15 +180,14 @@ function loadItems(db: DB, interviewId: number): InterviewItem[] {
  * caller; the DB rows that produced this write remain valid and the next mutation rewrites the file.
  */
 export function writeRecordMirror(deps: InterviewDeps, interviewId: number): void {
-  const { db, paths } = deps
+  const { db } = deps
   const row = interviewRowOr404(db, interviewId)
   const items = loadItems(db, interviewId)
   const candFolderRel = candidateFolderFor(db, row.candidate_id)
   const interviewsDirRel = `${candFolderRel}/interviews`
-  fs.mkdirSync(path.join(paths.dataRoot, interviewsDirRel), { recursive: true })
   const recordRel = `${interviewsDirRel}/round-${row.stage}-record.json`
   const record = { stage: row.stage, createdAt: row.created_at, bossDecision: row.boss_decision, items }
-  fs.writeFileSync(path.join(paths.dataRoot, recordRel), JSON.stringify(record, null, 2) + '\n', 'utf8')
+  writeCandidateFile(deps, recordRel, JSON.stringify(record, null, 2) + '\n')
   if (row.transcript_path === null) {
     db.prepare('UPDATE interviews SET transcript_path = ? WHERE id = ?').run(recordRel, interviewId)
   }

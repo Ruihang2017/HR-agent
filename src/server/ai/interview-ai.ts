@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
 import type { DB } from '../db'
 import type { JobpinPaths } from '../paths'
 import { ConflictError, NotFoundError, ValidationError } from '../errors'
@@ -17,8 +17,9 @@ import type { Gateway } from './gateway'
 import { persistAiOutput, type ManifestEntry } from './persist'
 import { scanText } from '../ai/sensitive-terms'
 import { addQuestion, getInterview, writeRecordMirror, candidateFolderFor, type InterviewDeps } from '../interviews'
+import { writeCandidateFile, existsCandidateFile, readCandidateFileText } from '../candidate-fs'
 
-export interface InterviewAiDeps { db: DB; paths: JobpinPaths; gateway: Pick<Gateway, 'complete'> }
+export interface InterviewAiDeps { db: DB; paths: JobpinPaths; gateway: Pick<Gateway, 'complete'>; dataKey?: Buffer }
 
 // Same mapping as analyze.ts's CONF - not exported there, so mirrored here.
 const CONF = { low: 0.33, medium: 0.66, high: 1 } as const
@@ -66,7 +67,7 @@ export async function generateQuestions(
 ): Promise<{ added: number; dropped: { text: string; terms: string[] }[] }> {
   const { db, paths } = deps
   const abs = (rel: string): string => join(paths.dataRoot, rel)
-  const interviewDeps: InterviewDeps = { db, paths }
+  const interviewDeps: InterviewDeps = { db, paths, dataKey: deps.dataKey }
 
   const interview = db.prepare('SELECT id, candidate_id FROM interviews WHERE id = ?').get(interviewId) as
     | { id: number; candidate_id: number } | undefined
@@ -84,9 +85,18 @@ export async function generateQuestions(
 
   // --- assemble materials + provenance manifest ------------------------
   const manifest: ManifestEntry[] = []
+  // Company/job files (jd, learned_skills, bank) - plain fs, never the seam (D-17).
   const readRel = (kind: string, rel: string): string | undefined => {
     if (!existsSync(abs(rel))) return undefined
     const text = readFileSync(abs(rel), 'utf8')
+    if (!text.trim()) return undefined
+    manifest.push({ kind, path: rel, chars: text.length })
+    return text
+  }
+  // Candidate-tree files (resume text, prior analysis output) - routed through the seam.
+  const readCandRel = (kind: string, rel: string): string | undefined => {
+    if (!existsCandidateFile(deps, rel)) return undefined
+    const text = readCandidateFileText(deps, rel)
     if (!text.trim()) return undefined
     manifest.push({ kind, path: rel, chars: text.length })
     return text
@@ -100,10 +110,10 @@ export async function generateQuestions(
   const doc = db
     .prepare("SELECT extracted_text_path FROM candidate_documents WHERE candidate_id = ? AND type = 'resume'")
     .get(cand.id) as { extracted_text_path: string | null } | undefined
-  if (!doc?.extracted_text_path || !existsSync(abs(doc.extracted_text_path))) {
+  if (!doc?.extracted_text_path || !existsCandidateFile(deps, doc.extracted_text_path)) {
     throw new ValidationError('no extracted text - resolve needs_review first')
   }
-  const resumeText = readRel('resume', doc.extracted_text_path) ?? ''
+  const resumeText = readCandRel('resume', doc.extracted_text_path) ?? ''
   const learnedSkills = readRel('learned_skills', `${job.folder_path}/learned_skills.md`)
 
   const candFolder = candidateFolderFor(db, cand.id)
@@ -114,8 +124,8 @@ export async function generateQuestions(
   const latestAnalysis = db
     .prepare("SELECT output_path FROM ai_analyses WHERE candidate_id = ? AND kind = 'candidate_analysis' ORDER BY id DESC LIMIT 1")
     .get(cand.id) as { output_path: string | null } | undefined
-  if (latestAnalysis?.output_path && existsSync(abs(latestAnalysis.output_path))) {
-    const text = readFileSync(abs(latestAnalysis.output_path), 'utf8')
+  if (latestAnalysis?.output_path && existsCandidateFile(deps, latestAnalysis.output_path)) {
+    const text = readCandidateFileText(deps, latestAnalysis.output_path)
     if (text.trim()) {
       manifest.push({ kind: 'analysis', path: latestAnalysis.output_path, chars: text.length })
       try {
@@ -173,7 +183,7 @@ export async function generateQuestions(
     }
   })()
 
-  persistAiOutput({ db, paths }, {
+  persistAiOutput({ db, paths, dataKey: deps.dataKey }, {
     jobId: job.id, candidateId: cand.id, kind: 'question_generation',
     provider: result.provider, model: result.model, promptVersion: QUESTION_PROMPT_VERSION,
     manifest, confidence: null, outputJson, candidateFolder: candFolder
@@ -197,7 +207,7 @@ export async function commentOnAnswer(
 ): Promise<{ comment: string; confidence: 'low' | 'medium' | 'high' }> {
   const { db, paths } = deps
   const abs = (rel: string): string => join(paths.dataRoot, rel)
-  const interviewDeps: InterviewDeps = { db, paths }
+  const interviewDeps: InterviewDeps = { db, paths, dataKey: deps.dataKey }
 
   const question = db.prepare('SELECT id, interview_id, text FROM interview_questions WHERE id = ?').get(questionId) as
     | { id: number; interview_id: number; text: string } | undefined
@@ -242,7 +252,7 @@ export async function commentOnAnswer(
     { ...result.output, provider: result.provider, model: result.model, promptVersion: ANSWER_COMMENT_PROMPT_VERSION, createdAt: new Date().toISOString() },
     null, 2
   )
-  persistAiOutput({ db, paths }, {
+  persistAiOutput({ db, paths, dataKey: deps.dataKey }, {
     jobId: job.id, candidateId: cand.id, kind: 'answer_comment',
     provider: result.provider, model: result.model, promptVersion: ANSWER_COMMENT_PROMPT_VERSION,
     manifest, confidence: confidenceNum, outputJson, candidateFolder: candFolder
@@ -326,7 +336,7 @@ export async function summariseInterview(
 }> {
   const { db, paths } = deps
   const abs = (rel: string): string => join(paths.dataRoot, rel)
-  const interviewDeps: InterviewDeps = { db, paths }
+  const interviewDeps: InterviewDeps = { db, paths, dataKey: deps.dataKey }
 
   const { interview, items } = getInterview(interviewDeps, interviewId) // 404s if unknown
 
@@ -340,9 +350,18 @@ export async function summariseInterview(
 
   // --- assemble materials + provenance manifest ------------------------
   const manifest: ManifestEntry[] = []
+  // Job file (jd) - plain fs, never the seam (D-17).
   const readRel = (kind: string, rel: string): string | undefined => {
     if (!existsSync(abs(rel))) return undefined
     const text = readFileSync(abs(rel), 'utf8')
+    if (!text.trim()) return undefined
+    manifest.push({ kind, path: rel, chars: text.length })
+    return text
+  }
+  // Candidate-tree files (resume text, prior analysis output) - routed through the seam.
+  const readCandRel = (kind: string, rel: string): string | undefined => {
+    if (!existsCandidateFile(deps, rel)) return undefined
+    const text = readCandidateFileText(deps, rel)
     if (!text.trim()) return undefined
     manifest.push({ kind, path: rel, chars: text.length })
     return text
@@ -352,14 +371,14 @@ export async function summariseInterview(
   const doc = db
     .prepare("SELECT extracted_text_path FROM candidate_documents WHERE candidate_id = ? AND type = 'resume'")
     .get(cand.id) as { extracted_text_path: string | null } | undefined
-  const resumeText = (doc?.extracted_text_path && readRel('resume', doc.extracted_text_path)) || ''
+  const resumeText = (doc?.extracted_text_path && readCandRel('resume', doc.extracted_text_path)) || ''
 
   let analysisFactorsSummary: string | undefined
   const latestAnalysis = db
     .prepare("SELECT output_path FROM ai_analyses WHERE candidate_id = ? AND kind = 'candidate_analysis' ORDER BY id DESC LIMIT 1")
     .get(cand.id) as { output_path: string | null } | undefined
-  if (latestAnalysis?.output_path && existsSync(abs(latestAnalysis.output_path))) {
-    const text = readFileSync(abs(latestAnalysis.output_path), 'utf8')
+  if (latestAnalysis?.output_path && existsCandidateFile(deps, latestAnalysis.output_path)) {
+    const text = readCandidateFileText(deps, latestAnalysis.output_path)
     if (text.trim()) {
       manifest.push({ kind: 'analysis', path: latestAnalysis.output_path, chars: text.length })
       analysisFactorsSummary = factorsOneLiner(text)
@@ -409,7 +428,7 @@ export async function summariseInterview(
   )
 
   // --- step 1: provenance row + versioned file, own tx/rollback --------
-  const { analysisId } = persistAiOutput({ db, paths }, {
+  const { analysisId } = persistAiOutput({ db, paths, dataKey: deps.dataKey }, {
     jobId: job.id, candidateId: cand.id, kind: 'interview_summary',
     provider: result.provider, model: result.model, promptVersion: INTERVIEW_SUMMARY_PROMPT_VERSION,
     manifest, confidence: out.interview_performance ? CONF[out.interview_performance.confidence] : null,
@@ -423,8 +442,7 @@ export async function summariseInterview(
   let summaryWritten = false
   try {
     db.transaction(() => {
-      mkdirSync(dirname(abs(summaryRel)), { recursive: true })
-      writeFileSync(abs(summaryRel), md, 'utf8')
+      writeCandidateFile(deps, summaryRel, md)
       summaryWritten = true
 
       db.prepare('UPDATE interviews SET summary_path = ?, ai_score = ? WHERE id = ?')
@@ -465,7 +483,7 @@ export async function summariseInterview(
       }
     })()
   } catch (e) {
-    if (summaryWritten && existsSync(abs(summaryRel))) rmSync(abs(summaryRel), { force: true })
+    if (summaryWritten && existsCandidateFile(deps, summaryRel)) rmSync(abs(summaryRel), { force: true })
     throw e
   }
 

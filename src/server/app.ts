@@ -13,6 +13,7 @@ export interface AppDeps {
   paths: JobpinPaths
   version: string
   ai?: AiRuntime
+  dataKey?: Buffer
 }
 
 /**
@@ -20,7 +21,7 @@ export interface AppDeps {
  * origin (file:// packaged, http://localhost:5173 in dev) and the server
  * itself only ever binds 127.0.0.1.
  */
-export function createApp({ db, paths, version, ai }: AppDeps): Hono {
+export function createApp({ db, paths, version, ai, dataKey }: AppDeps): Hono {
   const startedAt = Date.now()
   const app = new Hono()
   app.use('*', cors())
@@ -36,11 +37,11 @@ export function createApp({ db, paths, version, ai }: AppDeps): Hono {
 
   app.get('/version', c => c.json({ app: 'jobpin', version }))
 
-  registerJobRoutes(app, { db, paths })
-  registerEmailRoutes(app, { db, paths }) // no AI dependency - unlike the interview routes below
+  registerJobRoutes(app, { db, paths, dataKey })
+  registerEmailRoutes(app, { db, paths, dataKey }) // no AI dependency - unlike the interview routes below
   if (ai) {
-    registerAiRoutes(app, { db, paths, queue: ai.queue })
-    registerInterviewRoutes(app, { db, paths, gateway: ai.gateway })
+    registerAiRoutes(app, { db, paths, queue: ai.queue, dataKey })
+    registerInterviewRoutes(app, { db, paths, gateway: ai.gateway, dataKey })
   }
   return app
 }

@@ -5,10 +5,12 @@ import type { DB } from './db'
 import type { JobpinPaths } from './paths'
 import { NotFoundError, ValidationError } from './errors'
 import { candidateFolderFor } from './interviews'
+import { writeCandidateFile, readCandidateFileText } from './candidate-fs'
 
 export interface EmailDeps {
   db: DB
   paths: JobpinPaths
+  dataKey?: Buffer
 }
 
 export interface TemplateInput {
@@ -173,8 +175,7 @@ export function saveEmail(
     const fileRel = `${emailsDirRel}/${type}-${n}.md`
     const fileAbs = path.join(paths.dataRoot, fileRel)
     try {
-      fs.mkdirSync(path.join(paths.dataRoot, emailsDirRel), { recursive: true })
-      fs.writeFileSync(fileAbs, `Subject: ${subject}\n\n${body}`, 'utf8')
+      writeCandidateFile(deps, fileRel, `Subject: ${subject}\n\n${body}`)
       const info = db
         .prepare('INSERT INTO emails (candidate_id, type, file_path) VALUES (?, ?, ?)')
         .run(candidateId, type, fileRel)
@@ -223,11 +224,11 @@ export function setCompanySettings(deps: EmailDeps, patch: { name?: string; send
 }
 
 export function getEmail(deps: EmailDeps, emailId: number): EmailDetail {
-  const { db, paths } = deps
+  const { db } = deps
   const row = db
     .prepare('SELECT id, type, file_path AS filePath, created_at AS createdAt FROM emails WHERE id = ?')
     .get(emailId) as { id: number; type: string; filePath: string; createdAt: string } | undefined
   if (!row) throw new NotFoundError(`email ${emailId} not found`)
-  const content = fs.readFileSync(path.join(paths.dataRoot, row.filePath), 'utf8')
+  const content = readCandidateFileText(deps, row.filePath)
   return { id: row.id, type: row.type, createdAt: row.createdAt, content }
 }

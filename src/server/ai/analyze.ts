@@ -7,8 +7,9 @@ import { ANALYSIS_JSON_SCHEMA, AnalysisOutput, type AnalysisOutputT } from './sc
 import { ANALYSIS_PROMPT_VERSION, buildAnalysisPrompt, type AnalysisMaterials } from './prompts'
 import type { Gateway } from './gateway'
 import { persistAiOutput, type ManifestEntry } from './persist'
+import { existsCandidateFile, readCandidateFileText } from '../candidate-fs'
 
-export interface AnalyzeDeps { db: DB; paths: JobpinPaths; gateway: Pick<Gateway, 'complete'> }
+export interface AnalyzeDeps { db: DB; paths: JobpinPaths; gateway: Pick<Gateway, 'complete'>; dataKey?: Buffer }
 
 const CONF = { low: 0.33, medium: 0.66, high: 1 } as const
 
@@ -24,9 +25,18 @@ export async function analyzeCandidate(deps: AnalyzeDeps, candidateId: number): 
 
   // --- assemble materials + provenance manifest ------------------------
   const manifest: ManifestEntry[] = []
+  // Company/job files (jd, inject, values, preferences, learned_skills, references) - plain fs, never the seam (D-17).
   const readRel = (kind: string, rel: string): string | undefined => {
     if (!existsSync(abs(rel))) return undefined
     const text = readFileSync(abs(rel), 'utf8')
+    if (!text.trim()) return undefined
+    manifest.push({ kind, path: rel, chars: text.length })
+    return text
+  }
+  // The candidate's own resume text IS a candidate-tree file - routed through the seam.
+  const readCandRel = (kind: string, rel: string): string | undefined => {
+    if (!existsCandidateFile(deps, rel)) return undefined
+    const text = readCandidateFileText(deps, rel)
     if (!text.trim()) return undefined
     manifest.push({ kind, path: rel, chars: text.length })
     return text
@@ -55,7 +65,7 @@ export async function analyzeCandidate(deps: AnalyzeDeps, candidateId: number): 
   const doc = db.prepare(
     "SELECT * FROM candidate_documents WHERE candidate_id = ? AND type = 'resume'"
   ).get(candidateId) as { file_path: string; extracted_text_path: string | null } | undefined
-  if (!doc?.extracted_text_path || !existsSync(abs(doc.extracted_text_path))) {
+  if (!doc?.extracted_text_path || !existsCandidateFile(deps, doc.extracted_text_path)) {
     throw new ValidationError('no extracted text - resolve needs_review first')
   }
 
@@ -63,7 +73,7 @@ export async function analyzeCandidate(deps: AnalyzeDeps, candidateId: number): 
     jobName: job.name,
     candidateName: cand.name,
     jd,
-    resumeText: readRel('resume', doc.extracted_text_path) ?? '',
+    resumeText: readCandRel('resume', doc.extracted_text_path) ?? '',
     inject: readRel('inject', job.inject_path),
     values: readRel('values', 'company/values.md'),
     bossPreferences: readPreferences(),
@@ -98,7 +108,7 @@ export async function analyzeCandidate(deps: AnalyzeDeps, candidateId: number): 
   )
 
   // --- persist row + versioned file + latest copy atomically -----------
-  const { analysisId } = persistAiOutput({ db, paths }, {
+  const { analysisId } = persistAiOutput({ db, paths, dataKey: deps.dataKey }, {
     jobId: job.id, candidateId, kind: 'candidate_analysis',
     provider: result.provider, model: result.model, promptVersion: ANALYSIS_PROMPT_VERSION,
     manifest, confidence: overallConfidence, outputJson: json,

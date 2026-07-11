@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { rmSync } from 'node:fs'
+import { join } from 'node:path'
 import type { DB } from '../db'
-import type { JobpinPaths } from '../paths'
+import { writeCandidateFile, existsCandidateFile, type CandidateFsDeps } from '../candidate-fs'
 
 /** One provenance manifest entry: what material fed the prompt, and how big it was. */
 export interface ManifestEntry { kind: string; path: string; chars: number }
@@ -33,7 +33,7 @@ export interface PersistAiOutputResult { analysisId: number; outputPath: string 
  * ever points at a missing file.
  */
 export function persistAiOutput(
-  deps: { db: DB; paths: JobpinPaths },
+  deps: CandidateFsDeps & { db: DB },
   args: PersistAiOutputArgs
 ): PersistAiOutputResult {
   const { db, paths } = deps
@@ -50,10 +50,9 @@ export function persistAiOutput(
     )
     const id = Number(info.lastInsertRowid)
     versionedRel = `${args.candidateFolder}/analyses/analysis_${id}.json`
-    mkdirSync(dirname(abs(versionedRel)), { recursive: true })
-    writeFileSync(abs(versionedRel), args.outputJson)
+    writeCandidateFile(deps, versionedRel, args.outputJson)
     if (args.alsoLatestCopyAs) {
-      writeFileSync(abs(`${args.candidateFolder}/${args.alsoLatestCopyAs}`), args.outputJson)
+      writeCandidateFile(deps, `${args.candidateFolder}/${args.alsoLatestCopyAs}`, args.outputJson)
     }
     db.prepare('UPDATE ai_analyses SET output_path = ? WHERE id = ?').run(versionedRel, id)
     return id
@@ -63,7 +62,7 @@ export function persistAiOutput(
     const analysisId = insert()
     return { analysisId, outputPath: versionedRel }
   } catch (e) {
-    if (versionedRel && existsSync(abs(versionedRel))) rmSync(abs(versionedRel), { force: true })
+    if (versionedRel && existsCandidateFile(deps, versionedRel)) rmSync(abs(versionedRel), { force: true })
     throw e
   }
 }

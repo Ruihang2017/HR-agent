@@ -10,8 +10,8 @@ import { getRanking, listRankings, runRanking } from '../ranking'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-export function registerAiRoutes(app: Hono, deps: { db: DB; paths: JobpinPaths; queue: AnalysisQueue }): void {
-  const { db, paths, queue } = deps
+export function registerAiRoutes(app: Hono, deps: { db: DB; paths: JobpinPaths; queue: AnalysisQueue; dataKey?: Buffer }): void {
+  const { db, paths, queue, dataKey } = deps
 
   app.post('/jobs/:id/analyses', async c => {
     const jobId = Number(c.req.param('id'))
@@ -56,7 +56,7 @@ export function registerAiRoutes(app: Hono, deps: { db: DB; paths: JobpinPaths; 
   })
 
   app.post('/jobs/:id/rankings', c => {
-    const result = runRanking({ db, paths }, Number(c.req.param('id')))
+    const result = runRanking({ db, paths, dataKey }, Number(c.req.param('id')))
     return c.json(result, 201)
   })
   app.get('/jobs/:id/rankings', c => c.json(listRankings(db, Number(c.req.param('id')))))

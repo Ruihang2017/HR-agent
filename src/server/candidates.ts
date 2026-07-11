@@ -3,6 +3,7 @@ import path from 'node:path'
 import type { JobsDeps } from './jobs'
 import { extractText, extOf, type ExtractResult } from './extract'
 import { NotFoundError, ValidationError } from './errors'
+import { writeCandidateFile, readCandidateFileText, existsCandidateFile } from './candidate-fs'
 
 export interface CandidateSummary {
   id: number
@@ -59,12 +60,11 @@ function persistCandidate(
     const candRel = `${jobFolderRel}/candidates/candidate_${id}`
     const candAbs = path.join(paths.dataRoot, candRel)
     try {
-      fs.mkdirSync(candAbs, { recursive: true })
-      fs.writeFileSync(path.join(candAbs, originalName), originalBytes)
+      writeCandidateFile(deps, `${candRel}/${originalName}`, Buffer.from(originalBytes))
       let extractedRel: string | null = null
       if ('text' in result) {
         extractedRel = `${candRel}/resume_text.md`
-        fs.writeFileSync(path.join(candAbs, 'resume_text.md'), result.text, 'utf8')
+        writeCandidateFile(deps, extractedRel, result.text)
       }
       const profile: Profile = {
         name,
@@ -74,7 +74,7 @@ function persistCandidate(
         extraction: 'text' in result ? { status: 'ok' } : { status: 'failed', error: result.error },
         createdAt: new Date().toISOString()
       }
-      fs.writeFileSync(path.join(candAbs, 'profile.json'), JSON.stringify(profile, null, 2) + '\n', 'utf8')
+      writeCandidateFile(deps, `${candRel}/profile.json`, JSON.stringify(profile, null, 2) + '\n')
       db.prepare(
         'INSERT INTO candidate_documents (candidate_id, type, file_path, extracted_text_path) VALUES (?, ?, ?, ?)'
       ).run(id, 'resume', `${candRel}/${originalName}`, extractedRel)
@@ -134,7 +134,7 @@ export function listCandidates(deps: JobsDeps, jobId: number): CandidateSummary[
 }
 
 export function getCandidate(deps: JobsDeps, id: number): CandidateDetail {
-  const { db, paths } = deps
+  const { db } = deps
   const row = db
     .prepare('SELECT id, job_id, name, email, phone, status, created_at FROM candidates WHERE id = ?')
     .get(id) as
@@ -148,15 +148,16 @@ export function getCandidate(deps: JobsDeps, id: number): CandidateDetail {
   const folderPath = doc ? doc.file_path.slice(0, doc.file_path.lastIndexOf('/')) : ''
   let extractedText: string | null = null
   if (doc?.extracted_text_path) {
-    const abs = path.join(paths.dataRoot, doc.extracted_text_path)
-    if (fs.existsSync(abs)) extractedText = fs.readFileSync(abs, 'utf8')
+    if (existsCandidateFile(deps, doc.extracted_text_path)) {
+      extractedText = readCandidateFileText(deps, doc.extracted_text_path)
+    }
   }
   let extraction: CandidateDetail['extraction'] = { status: 'ok' }
   let originalFilename: string | undefined
-  const profileAbs = path.join(paths.dataRoot, folderPath, 'profile.json')
-  if (folderPath && fs.existsSync(profileAbs)) {
+  const profileRel = `${folderPath}/profile.json`
+  if (folderPath && existsCandidateFile(deps, profileRel)) {
     try {
-      const profile = JSON.parse(fs.readFileSync(profileAbs, 'utf8')) as Profile
+      const profile = JSON.parse(readCandidateFileText(deps, profileRel)) as Profile
       extraction = profile.extraction ?? extraction
       originalFilename = profile.originalFilename
     } catch {

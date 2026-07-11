@@ -9,6 +9,7 @@ import { ConflictError, NotFoundError, ValidationError } from './errors'
 export interface JobsDeps {
   db: DB
   paths: JobpinPaths
+  dataKey?: Buffer
 }
 
 export interface JobSummary {
