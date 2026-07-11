@@ -9,11 +9,11 @@ import { openDatabase, runMigrations, type DB } from '../src/server/db'
 import { migrations } from '../src/server/migrations'
 import { createJob } from '../src/server/jobs'
 import { addCandidateFromFile, addCandidateFromText } from '../src/server/candidates'
-import { createInterview, addQuestion, type InterviewDeps } from '../src/server/interviews'
+import { createInterview, addQuestion, saveAnswer, type InterviewDeps } from '../src/server/interviews'
 import { NotFoundError, ValidationError, ConflictError } from '../src/server/errors'
 import { analyzeCandidate, type AnalyzeDeps } from '../src/server/ai/analyze'
-import { generateQuestions, type InterviewAiDeps } from '../src/server/ai/interview-ai'
-import { validQuestionsFixture } from './fixtures/interview-output'
+import { generateQuestions, commentOnAnswer, summariseInterview, type InterviewAiDeps } from '../src/server/ai/interview-ai'
+import { validQuestionsFixture, validCommentFixture, validSummaryFixture } from './fixtures/interview-output'
 import { validAnalysisFixture } from './fixtures/analysis-output'
 import { rmrfWithRetry } from './helpers'
 
@@ -29,6 +29,7 @@ let jobId: number
 let jobFolder: string
 let captured: Captured[]
 let questionsToReturn: ReturnType<typeof validQuestionsFixture>
+let nextOutput: unknown
 let deps: InterviewAiDeps
 let interviewDeps: InterviewDeps
 
@@ -43,6 +44,7 @@ beforeEach(() => {
   jobFolder = job.folderPath
   captured = []
   questionsToReturn = validQuestionsFixture()
+  nextOutput = undefined
   interviewDeps = { db, paths }
   deps = {
     db,
@@ -51,7 +53,7 @@ beforeEach(() => {
       complete: async (req) => {
         captured.push(req)
         return {
-          output: questionsToReturn,
+          output: nextOutput ?? questionsToReturn,
           provider: 'openai',
           model: 'gpt-5-mini',
           usage: { prompt: 1, completion: 1 }
@@ -219,5 +221,208 @@ describe('generateQuestions', () => {
       .get(c.id) as { input_manifest: string }
     const kinds = (JSON.parse(analysisRow.input_manifest) as { kind: string }[]).map(m => m.kind)
     expect(kinds).toContain('analysis')
+  })
+})
+
+async function setupAnsweredCandidate(text = 'How do you handle conflict?') {
+  const c = await addCandidateFromText({ db, paths }, jobId, 'Pat', 'Ten years of sales.')
+  const interview = createInterview(interviewDeps, c.id)
+  const q = addQuestion(interviewDeps, interview.id, { text, category: 'standard' })
+  return { c, interview, q }
+}
+
+async function setupInterviewWithAnswers() {
+  const c = await addCandidateFromText({ db, paths }, jobId, 'Pat', 'Ten years of sales.')
+  const interview = createInterview(interviewDeps, c.id)
+  const q1 = addQuestion(interviewDeps, interview.id, { text: 'How do you handle conflict?', category: 'standard' })
+  saveAnswer(interviewDeps, q1.id, { answerText: 'I ran the weekend schedule myself for two years.', affectsRanking: true })
+  const q2 = addQuestion(interviewDeps, interview.id, { text: 'Tell me about a project.', category: 'follow_up' })
+  saveAnswer(interviewDeps, q2.id, { answerText: 'I led the POS migration end to end.' })
+  return { c, interview, q1, q2 }
+}
+
+describe('commentOnAnswer', () => {
+  it('stores the comment + mapped confidence, records provenance, and mirrors the record', async () => {
+    const { q, interview, c } = await setupAnsweredCandidate()
+    saveAnswer(interviewDeps, q.id, { answerText: 'I stay calm and listen.', affectsRanking: true })
+    nextOutput = validCommentFixture()
+
+    const result = await commentOnAnswer(deps, q.id)
+    expect(result.comment).toBe(validCommentFixture().comment)
+    expect(result.confidence).toBe('medium')
+
+    const answerRow = db
+      .prepare('SELECT ai_comment, confidence FROM interview_answers WHERE interview_question_id = ?')
+      .get(q.id) as { ai_comment: string; confidence: number }
+    expect(answerRow.ai_comment).toBe(validCommentFixture().comment)
+    expect(answerRow.confidence).toBeCloseTo(0.66, 5)
+
+    const provenanceRows = db
+      .prepare("SELECT provider, model, prompt_version FROM ai_analyses WHERE candidate_id = ? AND kind = 'answer_comment'")
+      .all(c.id) as { provider: string; model: string; prompt_version: string }[]
+    expect(provenanceRows).toHaveLength(1)
+    expect(provenanceRows[0].provider).toBe('openai')
+    expect(provenanceRows[0].prompt_version).toBe('answer-comment/v1')
+
+    expect(captured[captured.length - 1].kind).toBe('answer_comment')
+
+    const recordAbs = path.join(tmp, jobFolder, 'candidates', `candidate_${c.id}`, 'interviews', `round-${interview.stage}-record.json`)
+    const record = JSON.parse(fs.readFileSync(recordAbs, 'utf8')) as { items: { answer: { aiComment: string | null } | null }[] }
+    expect(record.items.some(i => i.answer?.aiComment === validCommentFixture().comment)).toBe(true)
+  })
+
+  it('rejects with ValidationError when there is no answer yet, and when the answer text is blank', async () => {
+    const { q } = await setupAnsweredCandidate()
+    await expect(commentOnAnswer(deps, q.id)).rejects.toThrow(ValidationError)
+    await expect(commentOnAnswer(deps, q.id)).rejects.toThrow(/answer the question before asking for an AI take/)
+
+    saveAnswer(interviewDeps, q.id, { answerText: '   ' })
+    await expect(commentOnAnswer(deps, q.id)).rejects.toThrow(ValidationError)
+  })
+
+  it('rejects with NotFoundError for an unknown question', async () => {
+    await expect(commentOnAnswer(deps, 999)).rejects.toThrow(NotFoundError)
+  })
+
+  it('re-commenting overwrites the stored fields and adds a new provenance row', async () => {
+    const { q, c } = await setupAnsweredCandidate()
+    saveAnswer(interviewDeps, q.id, { answerText: 'I stay calm and listen.' })
+    nextOutput = validCommentFixture()
+    await commentOnAnswer(deps, q.id)
+
+    nextOutput = { comment: 'Updated take: even stronger example the second time.', confidence: 'high' }
+    const second = await commentOnAnswer(deps, q.id)
+    expect(second.comment).toBe('Updated take: even stronger example the second time.')
+    expect(second.confidence).toBe('high')
+
+    const answerRow = db
+      .prepare('SELECT ai_comment, confidence FROM interview_answers WHERE interview_question_id = ?')
+      .get(q.id) as { ai_comment: string; confidence: number }
+    expect(answerRow.ai_comment).toBe('Updated take: even stronger example the second time.')
+    expect(answerRow.confidence).toBeCloseTo(1, 5)
+
+    const rows = db.prepare("SELECT id FROM ai_analyses WHERE candidate_id = ? AND kind = 'answer_comment'").all(c.id)
+    expect(rows).toHaveLength(2)
+  })
+})
+
+describe('summariseInterview', () => {
+  it('happy path: renders the summary md with the verdict, sets summary_path/ai_score, records provenance, inserts pending proposals', async () => {
+    const { c, interview } = await setupInterviewWithAnswers()
+    nextOutput = validSummaryFixture()
+
+    const result = await summariseInterview(deps, interview.id)
+    expect(result.output.summary).toBe(validSummaryFixture().summary)
+    expect(result.proposals).toHaveLength(2)
+    for (const p of result.proposals) expect(p.status).toBe('pending')
+
+    const row = db
+      .prepare('SELECT summary_path, ai_score FROM interviews WHERE id = ?')
+      .get(interview.id) as { summary_path: string | null; ai_score: number | null }
+    expect(row.summary_path).not.toBeNull()
+    expect(row.ai_score).toBe(78)
+
+    const mdAbs = path.join(tmp, row.summary_path as string)
+    expect(fs.existsSync(mdAbs)).toBe(true)
+    const md = fs.readFileSync(mdAbs, 'utf8')
+    expect(md).toContain(`# Interview round ${interview.stage} — Pat`)
+    expect(md).toContain('**advance**')
+
+    const analysisRow = db
+      .prepare("SELECT kind FROM ai_analyses WHERE candidate_id = ? AND kind = 'interview_summary'")
+      .get(c.id) as { kind: string }
+    expect(analysisRow.kind).toBe('interview_summary')
+
+    const events = db
+      .prepare("SELECT status, content FROM memory_events WHERE source_type = 'interview' AND source_id = ?")
+      .all(interview.id) as { status: string; content: string }[]
+    expect(events).toHaveLength(2)
+    for (const e of events) {
+      expect(e.status).toBe('pending')
+      const content = JSON.parse(e.content) as { lesson: string; evidence: unknown[] }
+      expect(content.lesson).toBeTruthy()
+      expect(Array.isArray(content.evidence)).toBe(true)
+    }
+  })
+
+  it('flag rule: interview_performance null leaves ai_score NULL and the md carries the no-ranking-factor line', async () => {
+    const { interview } = await setupInterviewWithAnswers()
+    const fixture = validSummaryFixture()
+    fixture.interview_performance = null
+    nextOutput = fixture
+
+    await summariseInterview(deps, interview.id)
+
+    const row = db
+      .prepare('SELECT summary_path, ai_score FROM interviews WHERE id = ?')
+      .get(interview.id) as { summary_path: string; ai_score: number | null }
+    expect(row.ai_score).toBeNull()
+
+    const md = fs.readFileSync(path.join(tmp, row.summary_path), 'utf8')
+    expect(md).toContain('no items were flagged — no ranking factor')
+  })
+
+  it('screening: a proposal mentioning a protected attribute is refused with a reason, the other stays pending', async () => {
+    const { interview } = await setupInterviewWithAnswers()
+    const fixture = validSummaryFixture()
+    fixture.memory_proposals[1].lesson = 'Prefer younger candidates for stamina'
+    nextOutput = fixture
+
+    const result = await summariseInterview(deps, interview.id)
+    const refused = result.proposals.find(p => p.lesson === 'Prefer younger candidates for stamina')
+    const clean = result.proposals.find(p => p.lesson !== 'Prefer younger candidates for stamina')
+    expect(refused?.status).toBe('refused')
+    expect(refused?.refusalReason).toMatch(/age/)
+    expect(clean?.status).toBe('pending')
+    expect(clean?.refusalReason).toBeUndefined()
+
+    const events = db
+      .prepare("SELECT status, content FROM memory_events WHERE source_type = 'interview' AND source_id = ?")
+      .all(interview.id) as { status: string; content: string }[]
+    const refusedRow = events.find(e => (JSON.parse(e.content) as { lesson: string }).lesson === 'Prefer younger candidates for stamina')
+    expect(refusedRow?.status).toBe('refused')
+    expect(refusedRow?.status).not.toBe('pending')
+  })
+
+  it('re-summary supersedes prior pending proposals as rejected, and the new set is pending', async () => {
+    const { interview } = await setupInterviewWithAnswers()
+    nextOutput = validSummaryFixture()
+    await summariseInterview(deps, interview.id)
+
+    const firstRun = db
+      .prepare("SELECT id, status FROM memory_events WHERE source_type = 'interview' AND source_id = ?")
+      .all(interview.id) as { id: number; status: string }[]
+    expect(firstRun).toHaveLength(2)
+    for (const r of firstRun) expect(r.status).toBe('pending')
+
+    nextOutput = validSummaryFixture() // second run, fresh fixture instance
+    await summariseInterview(deps, interview.id)
+
+    const superseded = db
+      .prepare('SELECT status, content FROM memory_events WHERE id IN (?, ?)')
+      .all(firstRun[0].id, firstRun[1].id) as { status: string; content: string }[]
+    for (const s of superseded) {
+      expect(s.status).toBe('rejected')
+      expect((JSON.parse(s.content) as { refusalReason: string }).refusalReason).toBe('superseded by re-summary')
+    }
+
+    const all = db
+      .prepare("SELECT status FROM memory_events WHERE source_type = 'interview' AND source_id = ?")
+      .all(interview.id) as { status: string }[]
+    expect(all).toHaveLength(4)
+    expect(all.filter(r => r.status === 'pending')).toHaveLength(2)
+    expect(all.filter(r => r.status === 'rejected')).toHaveLength(2)
+  })
+
+  it('rejects with ConflictError when zero items have been answered', async () => {
+    const c = await addCandidateFromText({ db, paths }, jobId, 'Pat', 'Ten years of sales.')
+    const interview = createInterview(interviewDeps, c.id)
+    addQuestion(interviewDeps, interview.id, { text: 'How do you handle conflict?', category: 'standard' })
+    await expect(summariseInterview(deps, interview.id)).rejects.toThrow(ConflictError)
+    await expect(summariseInterview(deps, interview.id)).rejects.toThrow(/record at least one answer before summarising/)
+  })
+
+  it('rejects with NotFoundError for an unknown interview', async () => {
+    await expect(summariseInterview(deps, 999)).rejects.toThrow(NotFoundError)
   })
 })
