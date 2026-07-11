@@ -10,7 +10,7 @@ import { openDatabase, runMigrations, type DB } from '../src/server/db'
 import { migrations } from '../src/server/migrations'
 import { createJob } from '../src/server/jobs'
 import { addCandidateFromText } from '../src/server/candidates'
-import { createBackup, readBackup, extractBackupTo } from '../src/server/backup'
+import { createBackup, readBackup, extractBackupTo, restoreSwap, assertValidRestoreTree } from '../src/server/backup'
 import { FILE_MAGIC } from '../src/server/cryptx'
 import { rmrfWithRetry } from './helpers'
 
@@ -162,5 +162,64 @@ describe('createBackup — keyless data dir', () => {
     const destDir = path.join(outDir, 'restored-keyless')
     await extractBackupTo(zipBytes, destDir)
     expect(fs.existsSync(path.join(destDir, 'jobpin.db'))).toBe(true)
+  })
+})
+
+describe('restoreSwap — crash-safe restore', () => {
+  // A live data folder with a sentinel, plus a valid extracted tree (has jobpin.db) as a sibling.
+  function seed(): { dataRoot: string; extracted: string } {
+    const dataRoot = path.join(outDir, 'live-data')
+    fs.mkdirSync(dataRoot, { recursive: true })
+    fs.writeFileSync(path.join(dataRoot, 'sentinel.txt'), 'ORIGINAL')
+    const extracted = `${dataRoot}.restore-tmp-1`
+    fs.mkdirSync(extracted, { recursive: true })
+    fs.writeFileSync(path.join(extracted, 'jobpin.db'), 'RESTORED-DB')
+    fs.writeFileSync(path.join(extracted, 'sentinel.txt'), 'RESTORED')
+    return { dataRoot, extracted }
+  }
+
+  it('rejects an archive missing jobpin.db and leaves the live data folder untouched', () => {
+    const dataRoot = path.join(outDir, 'live-data')
+    fs.mkdirSync(dataRoot, { recursive: true })
+    fs.writeFileSync(path.join(dataRoot, 'sentinel.txt'), 'ORIGINAL')
+    const bad = `${dataRoot}.restore-tmp-1`
+    fs.mkdirSync(bad, { recursive: true })
+    fs.writeFileSync(path.join(bad, 'notes.txt'), 'not a jobpin backup') // no jobpin.db
+
+    expect(() => restoreSwap(dataRoot, bad, { nowMs: 1 })).toThrowError(/missing jobpin\.db/)
+    // Live data untouched — never renamed aside.
+    expect(fs.readFileSync(path.join(dataRoot, 'sentinel.txt'), 'utf8')).toBe('ORIGINAL')
+    expect(fs.existsSync(`${dataRoot}.pre-restore-1`)).toBe(false)
+    expect(assertValidRestoreTree).toBeTypeOf('function')
+  })
+
+  it('swaps the restored tree into place and keeps the original as a .pre-restore sibling', () => {
+    const { dataRoot, extracted } = seed()
+    const pre = restoreSwap(dataRoot, extracted, { nowMs: 42 })
+
+    expect(fs.readFileSync(path.join(dataRoot, 'sentinel.txt'), 'utf8')).toBe('RESTORED')
+    expect(fs.readFileSync(path.join(dataRoot, 'jobpin.db'), 'utf8')).toBe('RESTORED-DB')
+    expect(pre).toBe(`${dataRoot}.pre-restore-42`)
+    expect(fs.readFileSync(path.join(pre, 'sentinel.txt'), 'utf8')).toBe('ORIGINAL') // recoverable copy kept
+    expect(fs.existsSync(extracted)).toBe(false) // moved, not copied
+  })
+
+  it('rolls back to the original data folder when the second move fails (compensation)', () => {
+    const { dataRoot, extracted } = seed()
+    let calls = 0
+    // Real rename on the first (dataRoot→pre) and third (pre→dataRoot compensation) calls;
+    // throw on the second (extracted→dataRoot) to simulate an EXDEV/EPERM mid-swap failure.
+    const renameFn = (from: string, to: string): void => {
+      calls += 1
+      if (calls === 2) throw new Error('simulated rename failure')
+      fs.renameSync(from, to)
+    }
+    expect(() => restoreSwap(dataRoot, extracted, { nowMs: 7, renameFn })).toThrowError(/simulated rename failure/)
+
+    // The original data folder is back in place — the boss is never left without one.
+    expect(fs.existsSync(dataRoot)).toBe(true)
+    expect(fs.readFileSync(path.join(dataRoot, 'sentinel.txt'), 'utf8')).toBe('ORIGINAL')
+    expect(fs.existsSync(`${dataRoot}.pre-restore-7`)).toBe(false) // renamed back, not left behind
+    expect(calls).toBe(3) // aside → failed move → compensation
   })
 })

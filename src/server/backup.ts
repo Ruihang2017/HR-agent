@@ -7,6 +7,7 @@ import JSZip from 'jszip'
 import type { DB } from './db'
 import type { JobpinPaths } from './paths'
 import { BACKUP_MAGIC, decryptBuffer, deriveBackupKey, isEncrypted } from './cryptx'
+import { renameSyncWithRetry } from './fsx'
 
 /**
  * Backup/restore core (Task 11, F8.4) - Electron-free so it is fully unit-testable; the
@@ -185,6 +186,59 @@ export function readBackup(inFile: string, opts: { passphrase?: string } = {}): 
   }
 
   throw new Error(WRONG_PASSPHRASE_MESSAGE)
+}
+
+/**
+ * Asserts `extractedDir` is a real Jobpin backup tree before it is allowed to replace the live
+ * data folder: it must contain `jobpin.db`. Guards against restoring an arbitrary zip (which
+ * would otherwise be swapped in and then leave the app with no database).
+ */
+export function assertValidRestoreTree(extractedDir: string): void {
+  if (!fs.existsSync(path.join(extractedDir, 'jobpin.db'))) {
+    throw new Error('restore archive is missing jobpin.db - not a valid Jobpin backup')
+  }
+}
+
+/**
+ * Crash-safe swap of a freshly-extracted backup tree into place, so a failed restore can never
+ * leave the boss without a data folder (F8.4). Steps:
+ *  1. Validate `extractedDir` first (must contain `jobpin.db`) - abort before touching anything.
+ *  2. Rename the live `dataRoot` aside to a `.pre-restore-<ts>` sibling (never delete - the boss
+ *     can always recover by hand).
+ *  3. Move `extractedDir` into `dataRoot`. If THAT fails, compensate by renaming the pre-restore
+ *     copy back to `dataRoot`, then rethrow the ORIGINAL error (mirrors renameJob's D-26
+ *     compensate-on-failure pattern). A double failure logs both paths and rethrows.
+ *
+ * Callers MUST extract into a sibling of `dataRoot` (same volume) so every rename is an atomic
+ * same-volume move - a cross-volume rename throws `EXDEV`, which `renameSyncWithRetry` does not
+ * retry, and would trigger exactly the data-loss window this function exists to close.
+ * Returns the pre-restore path so the caller can surface it to the boss.
+ */
+export function restoreSwap(
+  dataRoot: string,
+  extractedDir: string,
+  opts: { nowMs?: number; renameFn?: (from: string, to: string) => void } = {}
+): string {
+  const rename = opts.renameFn ?? renameSyncWithRetry
+  assertValidRestoreTree(extractedDir)
+  const preRestorePath = `${dataRoot}.pre-restore-${opts.nowMs ?? Date.now()}`
+  rename(dataRoot, preRestorePath)
+  try {
+    rename(extractedDir, dataRoot)
+  } catch (e) {
+    // Second move failed: put the original data folder back so the boss is never left without one.
+    try {
+      rename(preRestorePath, dataRoot)
+    } catch (compErr) {
+      console.error(
+        `restore compensation failed: your original data is safe at "${preRestorePath}" but ` +
+          `"${dataRoot}" may be absent - rename the pre-restore folder back by hand to recover`,
+        compErr
+      )
+    }
+    throw e
+  }
+  return preRestorePath
 }
 
 /** Guards against zip-slip: the resolved extraction target must stay inside `destDir`. */

@@ -3,8 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { resolveContainedPath } from './contained-path'
-import { createBackup, extractBackupTo, readBackup } from '../server/backup'
-import { renameSyncWithRetry } from '../server/fsx'
+import { createBackup, extractBackupTo, readBackup, restoreSwap } from '../server/backup'
 import type { DB } from '../server/db'
 import type { JobpinPaths } from '../server/paths'
 
@@ -70,7 +69,12 @@ export function registerIpc(state: IpcState): void {
     // Throws a clean 'wrong passphrase or corrupt backup' before anything on disk is touched.
     const zipBytes = readBackup(filePaths[0], { passphrase: payload.passphrase })
 
-    const tmpExtractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jobpin-restore-'))
+    const dataRoot = state.paths.dataRoot
+    // Extract into a SIBLING of dataRoot (same volume) so the final rename is an atomic
+    // same-volume move — os.tmpdir() is often a different drive, where renameSync throws EXDEV
+    // (not retried) and would leave dataRoot renamed away with no replacement in place.
+    const tmpExtractDir = `${dataRoot}.restore-tmp-${Date.now()}`
+    fs.rmSync(tmpExtractDir, { recursive: true, force: true }) // clear any leftover from a prior aborted restore
     await extractBackupTo(zipBytes, tmpExtractDir)
 
     // Close the live connection BEFORE renaming: on Windows, an open handle on jobpin.db (or
@@ -78,12 +82,10 @@ export function registerIpc(state: IpcState): void {
     // because we are seconds from app.exit() — nothing else touches `state.db` again.
     state.db.close()
 
-    // Safety-rename first (never delete): the boss can always recover the pre-restore state
-    // by hand. Only once that succeeds do we move the restored tree into place.
-    const dataRoot = state.paths.dataRoot
-    const preRestorePath = `${dataRoot}.pre-restore-${Date.now()}`
-    renameSyncWithRetry(dataRoot, preRestorePath)
-    renameSyncWithRetry(tmpExtractDir, dataRoot)
+    // Crash-safe swap: validates the tree, renames dataRoot aside, moves the restore in, and
+    // rolls back to the pre-restore copy if that move fails — the boss is never left without a
+    // data folder. Throws (bad archive / double failure) surface to the renderer as an error.
+    restoreSwap(dataRoot, tmpExtractDir)
 
     app.relaunch()
     app.exit(0)
