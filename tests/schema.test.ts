@@ -21,7 +21,7 @@ afterEach(() => {
 
 const EXPECTED_TABLES = [
   'ai_analyses', 'analysis_tasks', 'candidate_documents', 'candidates', 'documents', 'emails',
-  'interview_answers', 'interview_questions', 'interviews', 'jobs',
+  'interview_answers', 'interview_questions', 'interviews', 'jobs', 'maintenance_flags',
   'memory_events', 'migrations', 'ranking_items', 'rankings', 'settings', 'usage_events'
 ].sort()
 
@@ -31,7 +31,7 @@ describe('migrations', () => {
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
       .all() as { name: string }[]).map(r => r.name).sort()
     expect(tables).toEqual(EXPECTED_TABLES)
-    expect(getSchemaVersion(db)).toBe(3)
+    expect(getSchemaVersion(db)).toBe(4)
   })
 
   it('creates an index on every FK column', () => {

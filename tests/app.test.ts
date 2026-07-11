@@ -29,7 +29,7 @@ describe('createApp', () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.status).toBe('ok')
-    expect(body.schemaVersion).toBe(3)
+    expect(body.schemaVersion).toBe(4)
     expect(body.dataDir).toBe(tmp)
     expect(typeof body.uptimeSeconds).toBe('number')
     expect(body.encryption).toBe('unavailable')

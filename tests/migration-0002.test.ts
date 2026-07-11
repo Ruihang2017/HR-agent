@@ -9,7 +9,7 @@ describe('migration 0002', () => {
   it('applies over 0001 and records id 2', () => {
     const db = openDatabase(join(mkdtempSync(join(tmpdir(), 'jobpin-m2-')), 'test.db'))
     runMigrations(db, migrations)
-    expect(getSchemaVersion(db)).toBe(3)
+    expect(getSchemaVersion(db)).toBe(4)
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r: any) => r.name)
     expect(tables).toContain('analysis_tasks')
     expect(tables).toContain('usage_events')
@@ -19,7 +19,7 @@ describe('migration 0002', () => {
     const db = openDatabase(join(mkdtempSync(join(tmpdir(), 'jobpin-m2b-')), 'test.db'))
     runMigrations(db, migrations)
     runMigrations(db, migrations)
-    expect(getSchemaVersion(db)).toBe(3)
+    expect(getSchemaVersion(db)).toBe(4)
     db.close()
   })
   it('analysis_tasks defaults status=queued and attempts=0', () => {
