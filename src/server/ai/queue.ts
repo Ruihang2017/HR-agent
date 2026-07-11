@@ -74,8 +74,9 @@ export function createQueue(deps: {
       const jdText = existsSync(jdAbs) ? readFileSync(jdAbs, 'utf8') : ''
       if (!jdText.trim()) throw new ValidationError('job has no JD - add a job description before analysing')
       const explicit = candidateIds !== undefined
-      const rows = db.prepare('SELECT id FROM candidates WHERE job_id = ?').all(jobId) as { id: number }[]
-      const inJob = new Set(rows.map(r => r.id))
+      const rows = db.prepare('SELECT id, status FROM candidates WHERE job_id = ?').all(jobId) as
+        { id: number; status: string }[]
+      const statusById = new Map(rows.map(r => [r.id, r.status]))
       const targets = explicit ? candidateIds : rows.map(r => r.id)
 
       const hasText = db.prepare(
@@ -92,7 +93,11 @@ export function createQueue(deps: {
       const enqueued: number[] = []
       const skipped: { candidateId: number; reason: string }[] = []
       for (const cid of targets) {
-        if (!inJob.has(cid)) { skipped.push({ candidateId: cid, reason: 'not in this job' }); continue }
+        const status = statusById.get(cid)
+        if (status === undefined) { skipped.push({ candidateId: cid, reason: 'not in this job' }); continue }
+        // Deleted candidates (D-17) are never enqueued - not explicitly, and not swept in via
+        // the "all candidates in this job" default path either.
+        if (status === 'deleted') { skipped.push({ candidateId: cid, reason: 'candidate deleted' }); continue }
         if (!hasText.get(cid)) { skipped.push({ candidateId: cid, reason: 'no extracted text' }); continue }
         if (pendingTask.get(cid)) { skipped.push({ candidateId: cid, reason: 'already queued or running' }); continue }
         if (!explicit && doneTask.get(cid)) { skipped.push({ candidateId: cid, reason: 'already analysed' }); continue }

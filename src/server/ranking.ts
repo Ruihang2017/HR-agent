@@ -37,7 +37,10 @@ export function runRanking(deps: { db: DB; paths: JobpinPaths; dataKey?: Buffer 
   const { db } = deps
   if (!db.prepare('SELECT id FROM jobs WHERE id=?').get(jobId)) throw new NotFoundError(`job ${jobId} not found`)
 
-  const candidates = db.prepare('SELECT id, created_at FROM candidates WHERE job_id=? ORDER BY created_at, id').all(jobId) as
+  // Deleted candidates (D-17: status='deleted') are excluded from the scan - they must never
+  // reappear in a future ranking's `excluded` list. Their PAST ranking_items snapshot rows are
+  // untouched here; only the candidate scan that feeds a NEW ranking run is filtered.
+  const candidates = db.prepare("SELECT id, created_at FROM candidates WHERE job_id=? AND status != 'deleted' ORDER BY created_at, id").all(jobId) as
     { id: number; created_at: string }[]
 
   const latestStmt = db.prepare(

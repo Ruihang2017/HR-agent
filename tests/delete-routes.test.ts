@@ -36,7 +36,7 @@ const json = (body: unknown) => ({
 })
 
 describe('DELETE /candidates/:id', () => {
-  it('200 {deleted:true}; anonymises the row (survives, scrubbed) rather than removing it', async () => {
+  it('200 {deleted:true}; anonymises the row (survives, scrubbed) rather than removing it, but the API now 404s it (D-17 resurrection fix)', async () => {
     const { id: jobId } = await (await app.request('/jobs', json({ name: 'Barista' }))).json()
     const { id: candidateId, folderPath } = await (
       await app.request(`/jobs/${jobId}/candidates`, json({ name: 'Alex', text: 'resume text' }))
@@ -48,13 +48,21 @@ describe('DELETE /candidates/:id', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ deleted: true })
 
-    // Anonymised, not removed: the row (and job) survive, so a follow-up GET is 200.
+    // The row is anonymised at the DB level, not removed - kept for ranking_items FK integrity.
+    const row = db.prepare('SELECT name, status, email FROM candidates WHERE id = ?').get(candidateId) as {
+      name: string
+      status: string
+      email: string | null
+    }
+    expect(row.name).toBe('Deleted candidate')
+    expect(row.status).toBe('deleted')
+    expect(row.email).toBeNull()
+
+    // But a follow-up GET now 404s: a deleted candidate must not resurface with live action
+    // buttons on the detail page (the resurrection fix - getCandidate throws NotFoundError for
+    // status='deleted').
     const after = await app.request(`/candidates/${candidateId}`)
-    expect(after.status).toBe(200)
-    const afterBody = await after.json()
-    expect(afterBody.name).toBe('Deleted candidate')
-    expect(afterBody.status).toBe('deleted')
-    expect(afterBody.email).toBeNull()
+    expect(after.status).toBe(404)
 
     // Filesystem folder for the candidate is gone.
     expect(fs.existsSync(folderAbs)).toBe(false)

@@ -128,7 +128,9 @@ export function listCandidates(deps: JobsDeps, jobId: number): CandidateSummary[
   jobFolderOr404(deps, jobId)
   return deps.db
     .prepare(
-      'SELECT id, name, status, created_at AS createdAt FROM candidates WHERE job_id = ? ORDER BY created_at DESC, id DESC'
+      // Deleted candidates (D-17: anonymised, status='deleted') never appear in a job's list -
+      // they're gone, not just hidden.
+      "SELECT id, name, status, created_at AS createdAt FROM candidates WHERE job_id = ? AND status != 'deleted' ORDER BY created_at DESC, id DESC"
     )
     .all(jobId) as CandidateSummary[]
 }
@@ -141,6 +143,9 @@ export function getCandidate(deps: JobsDeps, id: number): CandidateDetail {
     | { id: number; job_id: number; name: string; email: string | null; phone: string | null; status: string; created_at: string }
     | undefined
   if (!row) throw new NotFoundError(`candidate ${id} not found`)
+  // Deleted candidates (D-17) 404 like they never existed - no live action buttons on a
+  // resurrected detail page.
+  if (row.status === 'deleted') throw new NotFoundError(`candidate ${id} not found`)
   const doc = db
     .prepare("SELECT file_path, extracted_text_path FROM candidate_documents WHERE candidate_id = ? AND type = 'resume'")
     .get(id) as { file_path: string; extracted_text_path: string | null } | undefined

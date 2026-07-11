@@ -4,7 +4,7 @@ import Handlebars from 'handlebars'
 import type { DB } from './db'
 import type { JobpinPaths } from './paths'
 import { NotFoundError, ValidationError } from './errors'
-import { candidateFolderFor } from './interviews'
+import { candidateFolderFor, assertCandidateNotDeleted } from './interviews'
 import { writeCandidateFile, readCandidateFileText } from './candidate-fs'
 
 export interface EmailDeps {
@@ -163,6 +163,7 @@ export function saveEmail(
   inputs: Record<string, string>
 ): { id: number; filePath: string; subject: string; body: string } {
   const { db, paths } = deps
+  assertCandidateNotDeleted(db, candidateId) // D-17: no new email folder for a deleted candidate
   const { subject, body } = renderEmail(deps, candidateId, type, inputs)
   const candFolderRel = candidateFolderFor(db, candidateId)
   const emailsDirRel = `${candFolderRel}/emails`

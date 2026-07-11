@@ -18,8 +18,15 @@ export async function analyzeCandidate(deps: AnalyzeDeps, candidateId: number): 
   const abs = (rel: string): string => join(paths.dataRoot, rel)
 
   const cand = db.prepare('SELECT * FROM candidates WHERE id = ?').get(candidateId) as
-    | { id: number; job_id: number; name: string } | undefined
+    | { id: number; job_id: number; name: string; status: string } | undefined
   if (!cand) throw new NotFoundError(`candidate ${candidateId} not found`)
+  // THE RESURRECTION GUARD (D-17): a worker can claim this task moments before the candidate is
+  // deleted - deleteCandidate anonymises the row AND removes the folder synchronously, but this
+  // function is mid-flight (already past its own DB read) when that happens. Without this check,
+  // the gateway call below still completes and persistAiOutput below THAT would recreate the
+  // just-removed candidate folder to write the analysis file - a deleted candidate's PII coming
+  // back from the dead. Checked fresh, right here, before any gateway call or file write.
+  if (cand.status === 'deleted') throw new ValidationError('candidate has been deleted')
   const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(cand.job_id) as
     { id: number; name: string; folder_path: string; jd_path: string; inject_path: string }
 
