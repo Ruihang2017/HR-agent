@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { resolveContainedPath } from './contained-path'
-import { createBackup, extractBackupTo, readBackup, restoreSwap } from '../server/backup'
+import { assertValidRestoreTree, createBackup, extractBackupTo, readBackup, restoreSwap } from '../server/backup'
 import type { DB } from '../server/db'
 import type { JobpinPaths } from '../server/paths'
 
@@ -76,6 +76,11 @@ export function registerIpc(state: IpcState): void {
     const tmpExtractDir = `${dataRoot}.restore-tmp-${Date.now()}`
     fs.rmSync(tmpExtractDir, { recursive: true, force: true }) // clear any leftover from a prior aborted restore
     await extractBackupTo(zipBytes, tmpExtractDir)
+
+    // Validate the archive BEFORE closing the live DB: a bad archive is rejected here while the
+    // app is still fully usable, so the boss doesn't have to restart after a failed restore.
+    // (restoreSwap re-validates, harmlessly, as its own first step.)
+    assertValidRestoreTree(tmpExtractDir)
 
     // Close the live connection BEFORE renaming: on Windows, an open handle on jobpin.db (or
     // its -wal/-shm siblings) blocks renaming the directory that contains it. Safe here only
