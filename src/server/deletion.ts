@@ -90,11 +90,15 @@ function purgeCandidateChildren(db: DB, candidateId: number): void {
  * Anonymises one candidate (PRD D-17): scrubs PII off the `candidates` row (name/email/phone,
  * status='deleted') rather than deleting it, so its ranking_items rows keep a valid FK and
  * their rank/score stand as-is in every past snapshot - only `reason` is scrubbed, gated
- * behind 'allow-reason-scrub' (migration 0004). Purges every other child row and scrubs
- * memory_events evidence quotes sourced from this candidate's interviews. `learned_skills.md`
- * (job-level, approved knowledge) is never touched. The candidate's folder is removed via
- * `rmrfWithRetry` AFTER the transaction commits - a removal failure logs and rethrows without
- * undoing the already-durable anonymisation.
+ * behind 'allow-reason-scrub' (migration 0004). Purges every other child row - including this
+ * candidate's `emails` rows: their .md files live in the candidate folder and die with it, and
+ * a pointer to a destroyed file has no audit value (unlike ranking rows, whose rank/score are
+ * protected history), it just ENOENTs on read. De-identifies `usage_events`
+ * (candidate_id -> NULL; spec section 7 - the token-usage record survives, de-identified) and
+ * scrubs memory_events evidence quotes sourced from this candidate's interviews.
+ * `learned_skills.md` (job-level, approved knowledge) is never touched. The candidate's folder
+ * is removed via `rmrfWithRetry` AFTER the transaction commits - a removal failure logs and
+ * rethrows without undoing the already-durable anonymisation.
  */
 export function deleteCandidate(deps: DeletionDeps, candidateId: number): void {
   const { db, paths } = deps
@@ -106,6 +110,8 @@ export function deleteCandidate(deps: DeletionDeps, candidateId: number): void {
       candidateId
     )
     purgeCandidateChildren(db, candidateId)
+    db.prepare('DELETE FROM emails WHERE candidate_id = ?').run(candidateId)
+    db.prepare('UPDATE usage_events SET candidate_id = NULL WHERE candidate_id = ?').run(candidateId)
     db.prepare(
       "UPDATE candidates SET name = 'Deleted candidate', email = NULL, phone = NULL, status = 'deleted' WHERE id = ?"
     ).run(candidateId)

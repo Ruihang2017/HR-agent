@@ -10,6 +10,7 @@ import { migrations } from '../src/server/migrations'
 import { createJob } from '../src/server/jobs'
 import { addCandidateFromText } from '../src/server/candidates'
 import { createInterview, addQuestion, saveAnswer, candidateFolderFor } from '../src/server/interviews'
+import { listEmails } from '../src/server/emails'
 import { NotFoundError } from '../src/server/errors'
 import { deleteCandidate, deleteJob, type DeletionDeps } from '../src/server/deletion'
 import { rmrfWithRetry } from './helpers'
@@ -37,7 +38,8 @@ afterEach(() => {
  * Seeds one job with 2 candidates (Alice, Bob), a completed interview round + answered
  * question for Alice, a `memory_events` row sourced from that interview with an evidence
  * quote, a ranking snapshot (via direct inserts, per the brief) covering both candidates,
- * and an email for Alice. Returns every id a test needs to assert on.
+ * an email for Alice, and a `usage_events` token-metering row for Alice. Returns every id
+ * a test needs to assert on.
  */
 async function seedScenario(d: DeletionDeps, jobName = 'Barista') {
   const job = createJob({ db: d.db, paths: d.paths }, jobName, 'We need a friendly barista.')
@@ -80,6 +82,14 @@ async function seedScenario(d: DeletionDeps, jobName = 'Barista') {
   fs.writeFileSync(path.join(d.paths.dataRoot, emailRel), 'Subject: Offer\n\nCongratulations.')
   d.db.prepare('INSERT INTO emails (candidate_id, type, file_path) VALUES (?, ?, ?)').run(a.id, 'offer', emailRel)
 
+  const usageInfo = d.db
+    .prepare(
+      `INSERT INTO usage_events (provider, model, kind, prompt_tokens, completion_tokens, job_id, candidate_id)
+       VALUES ('openai', 'gpt-5-mini', 'candidate_analysis', 1200, 300, ?, ?)`
+    )
+    .run(job.id, a.id)
+  const usageEventId = Number(usageInfo.lastInsertRowid)
+
   const rankingInfo = d.db.prepare("INSERT INTO rankings (job_id, criteria, reason) VALUES (?, '[]', 'initial')").run(job.id)
   const rankingId = Number(rankingInfo.lastInsertRowid)
   const itemAInfo = d.db
@@ -96,6 +106,7 @@ async function seedScenario(d: DeletionDeps, jobName = 'Barista') {
     interviewId: interview.id,
     questionId: question.id,
     memoryEventId,
+    usageEventId,
     rankingId,
     itemAId: Number(itemAInfo.lastInsertRowid),
     itemBId: Number(itemBInfo.lastInsertRowid)
@@ -160,6 +171,27 @@ describe('deleteCandidate', () => {
       status: string
     }
     expect(bobRow).toEqual({ name: 'Bob', email: null, status: 'new' })
+  })
+
+  it('1b. de-identifies usage_events: candidate_id NULL, but the token-usage row itself survives', async () => {
+    const s = await seedScenario(deps)
+
+    deleteCandidate(deps, s.a.id)
+
+    const usageRow = db
+      .prepare('SELECT candidate_id, prompt_tokens, completion_tokens FROM usage_events WHERE id = ?')
+      .get(s.usageEventId) as { candidate_id: number | null; prompt_tokens: number; completion_tokens: number }
+    expect(usageRow).toEqual({ candidate_id: null, prompt_tokens: 1200, completion_tokens: 300 })
+  })
+
+  it('1c. purges emails rows (their files die with the folder - no orphaned pointer that ENOENTs on read)', async () => {
+    const s = await seedScenario(deps)
+    expect(db.prepare('SELECT COUNT(*) AS c FROM emails WHERE candidate_id = ?').get(s.a.id)).toEqual({ c: 1 })
+
+    deleteCandidate(deps, s.a.id)
+
+    expect(listEmails(deps, s.a.id)).toEqual([])
+    expect(db.prepare('SELECT COUNT(*) AS c FROM emails WHERE candidate_id = ?').get(s.a.id)).toEqual({ c: 0 })
   })
 
   it('2. after deletion, a plain UPDATE ranking_items SET score=... STILL aborts (flag cleaned up -> 11.1-5 regression holds)', async () => {
