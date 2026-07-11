@@ -123,7 +123,7 @@ guess. App restart with queued work resumes it.
 `sensitive_flags` (11.1-2); every run snapshots (11.1-5); analysis never runs without an
 explicit boss action (token spend is boss-controlled).
 
-## 4. Interview loop & memory — Designed (P3, spec `2026-07-11-phase-3-interview-loop-memory-design.md`)
+## 4. Interview loop & memory — Built (P3, spec `2026-07-11-phase-3-interview-loop-memory-design.md`)
 
 > Settled at the P3 design session: `interview_performance` is scored **only from items the boss
 > flagged affects-ranking** (none flagged → no factor); multiple simple rounds (latest round's
