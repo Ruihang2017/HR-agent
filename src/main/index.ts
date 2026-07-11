@@ -102,7 +102,7 @@ if (!gotLock) {
       ai.queue.kick()
 
       // Step 6: bridge + window.
-      registerIpc({ port, dataRoot: paths.dataRoot, version: app.getVersion() })
+      registerIpc({ port, dataRoot: paths.dataRoot, version: app.getVersion(), paths, db, dataKey: dataKey ?? undefined })
       mainWindow = createWindow()
     } catch (err) {
       // Honesty-in-failure (spec section 3): plain-language dialog, clean exit.
