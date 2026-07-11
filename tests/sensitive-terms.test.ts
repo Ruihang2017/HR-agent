@@ -62,6 +62,30 @@ describe('scanText - protected attribute detector', () => {
     it('detects age from "Prefers candidates who are young" (memory-proposal phrasing)', () => {
       expect(scanText('Prefers candidates who are young')).toContain('age')
     })
+
+    it('detects gender from "What is your sex?"', () => {
+      expect(scanText('What is your sex?')).toContain('gender')
+    })
+
+    it('detects national origin from "Where are you from?"', () => {
+      expect(scanText('Where are you from?')).toContain('national origin')
+    })
+
+    it('detects age from "What year were you born?"', () => {
+      expect(scanText('What year were you born?')).toContain('age')
+    })
+
+    it('detects marital status from "Are you single?"', () => {
+      expect(scanText('Are you single?')).toContain('marital status')
+    })
+
+    it('detects sexual orientation from "Are you bisexual?"', () => {
+      expect(scanText('Are you bisexual?')).toContain('sexual orientation')
+    })
+
+    it('detects sexual orientation from "Do you identify as LGBTQ?"', () => {
+      expect(scanText('Do you identify as LGBTQ?')).toContain('sexual orientation')
+    })
   })
 
   describe('CLEAN - should not detect false positives', () => {
@@ -79,6 +103,14 @@ describe('scanText - protected attribute detector', () => {
 
     it('allows question about technical experience', () => {
       expect(scanText('Describe your experience with POS systems.')).toEqual([])
+    })
+
+    it('allows "single shift" phrasing (only "are you single" must hit marital status)', () => {
+      expect(scanText('Is this a single shift or split shift role?')).toEqual([])
+    })
+
+    it('allows "straight answer" phrasing (we deliberately do not match "straight" - too ambiguous)', () => {
+      expect(scanText('Give me a straight answer about your availability.')).toEqual([])
     })
   })
 
