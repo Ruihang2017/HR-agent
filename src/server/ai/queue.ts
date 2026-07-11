@@ -1,6 +1,8 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { DB } from '../db'
 import type { JobpinPaths } from '../paths'
-import { ConflictError, NotFoundError } from '../errors'
+import { ConflictError, NotFoundError, ValidationError } from '../errors'
 import { GatewayError, type Gateway } from './gateway'
 import { analyzeCandidate as realAnalyze } from './analyze'
 
@@ -66,8 +68,11 @@ export function createQueue(deps: {
 
   return {
     enqueueAnalyses(jobId, candidateIds) {
-      const job = db.prepare('SELECT id FROM jobs WHERE id = ?').get(jobId)
+      const job = db.prepare('SELECT id, jd_path FROM jobs WHERE id = ?').get(jobId) as { id: number; jd_path: string } | undefined
       if (!job) throw new NotFoundError(`job ${jobId} not found`)
+      const jdAbs = join(paths.dataRoot, job.jd_path)
+      const jdText = existsSync(jdAbs) ? readFileSync(jdAbs, 'utf8') : ''
+      if (!jdText.trim()) throw new ValidationError('job has no JD - add a job description before analysing')
       const explicit = candidateIds !== undefined
       const rows = db.prepare('SELECT id FROM candidates WHERE job_id = ?').all(jobId) as { id: number }[]
       const inJob = new Set(rows.map(r => r.id))

@@ -47,8 +47,69 @@ also have a dated entry below.
 | **D-26** | 2026-07-10 | **Transactional job rename (Phase 1):** filesystem rename first (retry-wrapped), then one DB transaction updating the job row and rewriting every known path column by LIKE-escaped prefix match (`ESCAPE '\'`); on DB failure a compensating rename restores the folder (a compensation failure is logged with both paths and the **original** DB error is rethrown). Display renames that derive the same folder name case-insensitively skip the fs rename and path rewrite entirely. | fs-first is recoverable by compensation; DB-first would leave rows pointing at a folder that never moved. LIKE-escaping stops folder names containing `%`/`_`/`\` from rewriting other jobs' rows. NTFS is case-insensitive — a case-only "rename" must not be treated as a folder move. |
 | **D-27** | 2026-07-10 | **Windows fs-retry policy (Phase 1, standing):** directory renames go through `renameSyncWithRetry` (`src/server/fsx.ts`) — bounded retry (10 × 50 ms, `Atomics.wait` sync sleep) on `EPERM`/`EBUSY`/`EACCES`; test teardown uses the matching `rmrfWithRetry`. | Antivirus/search-indexer briefly locks freshly created folders on Windows; unretried renames flaked at ~25–50% in Phase 1 test runs (pre-existing, proven not introduced by the feature). Real boss machines run AV — this is product hardening, not test convenience. |
 | **D-28** | 2026-07-10 | **Technical design layer adopted at `docs/design/`** — `design-architecture.md` (components & boundaries), `design-memory.md` (data & memory), `design-workflows.md` (feature runbooks) — published on the docs portal and listed as PRD companions. *Partially supersedes D-25:* the "Wide component-overview doc" trigger (Phase 2–3) fired early. Drift control: per-section status tags (Built / Planned), built sections point to phase specs, PRD wins on conflict, docs revised at each phase design session. | The manager reviewing the portal needs the HOW layer to give technical input **before** Phase 2 is built; per-phase specs are per-slice records with no cross-phase overview a reviewer can read in one sitting. |
+| **D-29** | 2026-07-11 | **Phase 2 architecture: queue-first, raw-HTTP adapters, no provider SDKs.** All model calls go through one gateway with hand-written `fetch` adapters (OpenAI `json_schema` strict · DeepSeek `json_object` + schema-in-system · Anthropic forced tool-use); analyses execute through a restart-safe DB-backed queue (`analysis_tasks`, concurrency 2, boot recovery re-queues interrupted work). `zod` is the only new dependency. | Owner chose Approach C. No SDKs = no type leakage through the gateway boundary, trivial fixture testing, zero SDK version churn; the queue survives app restarts and keeps batch analysis observable and retryable. |
+| **D-30** | 2026-07-11 | **AI actions are explicit; ranking composition rules fixed.** Analysis ("Analyse" / "Analyse all new") and ranking ("Rank now") only run on a boss click — no automatic token spend. Ranking: weights `jd_fit .35 · key_skills .25 · relevant_experience .20 · growth_trajectory .10 · boss_preference_match .10`; factors without data are **excluded and the remaining weights renormalised to sum 1** (`interview_performance` excluded until Phase 3; `boss_preference_match` participates only when **every** included analysis has it); every exclusion recorded in the snapshot's `criteria`; unanalysed candidates reported, never silently dropped. | Owner decisions at design time — boss-controlled cost, honest scores over formula-shape stability (zero-filling absent factors would deflate scores misleadingly), and cross-candidate comparability beats per-candidate completeness. |
+| **D-31** | 2026-07-11 | **Subscription stubbed behind a `TokenIssuer` seam + advisory local metering.** The vendor service doesn't exist yet: `DevTokenIssuer` reads `.env` keys under a fake Pro plan; every gateway call records `usage_events`; the Settings page shows usage vs the D-13 allowances **advisory-only, dev-stub numbers, no enforcement**. Model-catalog ids are code constants (verified at live smoke; one-line edits when they churn). | Owner chose stub + local metering. The interface is the seam where real token issuance (D-12) lands without touching feature code; advisory numbers approximate the real UX without building throwaway enforcement. |
+| **D-32** | 2026-07-11 | **Adapter-owned output-mode instructions; a JD is required before analysis.** The shared analysis prompt carries no output-format instruction — each adapter appends its own (JSON-object wording for OpenAI/DeepSeek, "call the tool once with a complete input" for Anthropic). Analysing a job with an empty `jd.md` is refused with a clear message at both the enqueue and the pipeline. | Post-eval debugging root causes: the shared "respond with a single JSON object, no prose" line conflicted with Anthropic's forced tool-use and produced malformed tool input (live-verified both ways); an empty JD made honest models return empty evidence arrays that the schema (rightly) rejects — analysing JD-fit without a JD is a meaningless task, refused upfront. Also learned: claude-sonnet-5 rejects assistant-prefill, so prefill-based JSON extraction is not viable. |
 
 ---
+
+### 2026-07-11 — Phase 2 architecture: queue-first gateway with raw-HTTP adapters (D-29) and explicit AI actions + composition rules (D-30)
+**Decision:** Phase 2's two structural calls, both owner-made at the design session:
+1. **D-29 — Approach C, "queue-first, no SDKs".** One gateway is the single call site for all
+   LLM work; its three provider adapters are hand-written over raw `fetch` (OpenAI strict
+   `json_schema` · DeepSeek `json_object` with the schema described in the system text +
+   gateway validate-and-retry · Anthropic forced tool-use). Analyses run through a restart-safe
+   queue: `analysis_tasks` rows claimed atomically, worker concurrency 2, interrupted tasks
+   re-queued at boot, failures stored with typed error codes and retried only by explicit boss
+   action. `zod` is the only new dependency.
+2. **D-30 — explicit actions; fixed composition rules.** Nothing spends tokens without a boss
+   click. Ranking totals are composed in code from per-factor scores: absent factors are
+   excluded and remaining weights renormalised (interview_performance arrives in Phase 3;
+   boss_preference_match is all-or-none across a run for comparability); the snapshot's
+   `criteria` records factors, weights, exclusions, and the exact input analyses.
+**Alternatives:** official SDKs behind the same interface (rejected — three dependencies, type
+leakage pressure, uglier fixture testing); a gateway framework (rejected — abstraction mismatch,
+less provenance control); synchronous per-request analysis with UI-orchestrated batches
+(rejected by owner in favour of restart resilience); auto-analysis on intake (rejected — silent
+token spend); zero-filling absent ranking factors (rejected — misleadingly deflated scores).
+**Status:** Active. D-29/D-30 (index above); spec section 2/6/8/9.
+
+### 2026-07-11 — Subscription dev-stub: TokenIssuer seam + advisory metering (D-31)
+**Decision:** Until the vendor subscription service exists, model credentials come from a
+`TokenIssuer` interface with a dev implementation reading `.env` keys under a stub Pro plan.
+Every gateway call inserts a `usage_events` row from provider-reported usage; the Settings page
+shows month-to-date usage against the D-13 allowances, clearly labelled advisory with dev-stub
+numbers and no enforcement. Model-catalog ids live as code constants.
+**Context:** Owner chose "stub + local metering" over interface-only or building the vendor
+service now. The real token-issuance client (D-12) replaces `DevTokenIssuer` behind the same
+seam; at-cap behaviour, TTL/rotation/revocation, DeepSeek's thin metering APIs, and real
+allowances remain vendor-service design items.
+**Alternatives:** interface + stub without metering (rejected — loses the usage-visibility UX);
+building a minimal vendor service now (rejected — new hosted subsystem out of Phase 2 scope).
+**Status:** Active. D-31 (index above).
+
+### 2026-07-11 — Provider-conformance lessons: adapter-owned output instructions; JD required (D-32)
+**Decision:** (1) The shared analysis prompt no longer carries any output-format instruction —
+each adapter appends the wording its transport needs (Anthropic's forced tool-use gets "report
+your analysis by calling the tool exactly once with a complete input object"). (2) Analysis of a
+job whose `jd.md` is empty is refused with `ValidationError('job has no JD - add a job
+description before analysing')` at both the enqueue and the pipeline (defence in depth).
+**Context:** The owner's first cross-provider run failed on DeepSeek and Anthropic in-app while
+OpenAI "worked". Systematic debugging found two independent root causes: the shared "respond
+with a single JSON object — no prose" instruction made Claude emit malformed tool input
+(missing keys, nested objects serialized as strings — reproduced and fix-verified live on
+claude-sonnet-5); and the test job's empty JD made honest models return empty evidence arrays
+that the schema's evidence-per-conclusion rule (F3.3) rightly rejects — OpenAI had only
+"succeeded" by conjuring JD-fit evidence from the resume alone. Also established:
+claude-sonnet-5 rejects assistant-message prefill, ruling out prefill-based JSON extraction.
+**Alternatives:** relaxing the evidence-min-1 schema rule (rejected — weakens F3.3; the true
+defect was asking an impossible question); text-mode + prefill for Anthropic (not viable —
+prefill rejected by the model); coercing stringified tool fields (rejected — patches the symptom).
+**Verification:** eval went 12/15 → 14/15 with the remaining Anthropic cell a probed 2/2-pass
+nondeterministic flake covered in-app by the gateway's corrective re-ask; owner's full manual
+walk then passed on all three providers.
+**Status:** Active. D-32 (index above); recorded in the Phase 2 handover.
 
 ### 2026-07-10 — Technical design layer at `docs/design/` (D-28, partially supersedes D-25)
 **Decision:** Adopt a maintained technical design layer at `docs/design/`, published on the docs

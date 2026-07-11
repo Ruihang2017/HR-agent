@@ -15,7 +15,7 @@ export const anthropicAdapter: ProviderAdapter = {
       body: JSON.stringify({
         model: req.model,
         max_tokens: req.maxOutputTokens,
-        system: req.system,
+        system: `${req.system}\n\nReport your analysis by calling the ${req.schemaName} tool exactly once, with a complete input object.`,
         messages: [{ role: 'user', content: req.user }],
         tools: [{ name: req.schemaName, description: 'Report the structured analysis result.', input_schema: req.jsonSchema }],
         tool_choice: { type: 'tool', name: req.schemaName }

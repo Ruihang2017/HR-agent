@@ -19,8 +19,9 @@
 | **Service modules** (`src/server/`) | Built (P1) | Domain logic: `naming` · `jobs` · `candidates` · `extract` · `fsx`; Electron-free, dependency-injected, unit-tested |
 | **SQLite index** (better-sqlite3) | Built (P0) | 13 tables; the *index* over the file store; migrations; ranking-immutability triggers |
 | **File store** (`~/jobpin-data/`) | Built (P0–1) | The *substance*: every job/candidate artifact as boss-readable files; one folder = the complete data set |
-| **Model gateway** | Planned (P2) | Single call site for all LLM work; provider adapters (OpenAI / DeepSeek / Anthropic); records provider+model+prompt-version per call |
-| **Subscription client** | Planned (P2) | Activates the boss's plan, obtains short-lived scoped provider credentials (token issuance, D-12); no candidate content passes through it |
+| **Model gateway** | Built (P2) | Single call site for all LLM work; raw-HTTP adapters (OpenAI / DeepSeek / Anthropic, no SDKs); records provider+model+prompt-version+usage per call |
+| **Analysis queue** | Built (P2) | Restart-safe explicit analysis execution (`analysis_tasks`, concurrency 2, boot recovery, boss-retried failures) |
+| **Subscription client** | Stubbed (P2) | `TokenIssuer` seam + dev implementation (env keys, fake Pro plan, advisory metering); real token issuance (D-12) lands behind the same seam |
 | **Vendor subscription service** | Planned (P2, vendor-side) | Plan auth, token issuance, metering; the only cloud component we run — never sees hiring data |
 | **Template engine** | Planned (P4) | Email/document generation from local templates; renders, never sends |
 | **Encryption & backup** | Planned (P5) | Candidate-data-only encryption at rest (D-17); one-folder backup/restore |
@@ -83,7 +84,7 @@ These rules are enforced by review and tests; breaking one is a defect, not a st
 Principle: **honesty under uncertainty** (PRD section 7). Failures are visible states the boss can
 act on, never silent defaults.
 
-## 4. AI layer — Designed (P2, spec `2026-07-11-phase-2-ai-analysis-ranking-design.md`)
+## 4. AI layer — Built (P2, spec `2026-07-11-phase-2-ai-analysis-ranking-design.md`)
 
 - **One gateway, no leaks — and no SDKs at all.** Every model call goes through one gateway
   module with hand-rolled raw-HTTP adapters (OpenAI / DeepSeek / Anthropic); provider SDK types

@@ -77,7 +77,12 @@ folder removed.
 `needs_review` candidate whose page explains why, with the original one click away (never a dead
 end). Batch drops: each file succeeds/fails independently; failures are listed by name.
 
-## 3. AI analysis & ranking — Designed (P2, spec `2026-07-11-phase-2-ai-analysis-ranking-design.md`)
+## 3. AI analysis & ranking — Built (P2, spec `2026-07-11-phase-2-ai-analysis-ranking-design.md`)
+
+> Two conformance rules learned in the field (D-32): output-format instructions are
+> **adapter-owned**, never in the shared prompt (forced tool-use conflicts with "respond with
+> JSON" wording); and a job **must have a JD** before analysis — refused with a clear message,
+> because judging JD-fit without a JD makes honest models return evidence-free judgments.
 
 Per-candidate analysis — **explicit, queued, restart-safe**:
 

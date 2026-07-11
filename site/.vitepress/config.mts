@@ -60,6 +60,7 @@ export default defineConfig({
         items: [
           ...itemsFor('docs/superpowers/specs'),
           ...itemsFor('docs/superpowers/plans'),
+          ...itemsFor('docs/superpowers/evals'),
           { text: 'Phase 0 install checklist', link: '/docs/phase0-install-checklist' }
         ]
       }

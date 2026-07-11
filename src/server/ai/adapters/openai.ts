@@ -10,7 +10,7 @@ export const openaiAdapter: ProviderAdapter = {
       body: JSON.stringify({
         model: req.model,
         messages: [
-          { role: 'system', content: req.system },
+          { role: 'system', content: `${req.system}\n\nRespond only with the single JSON object required by the response schema.` },
           { role: 'user', content: req.user }
         ],
         response_format: {
