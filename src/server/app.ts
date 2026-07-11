@@ -3,6 +3,7 @@ import { cors } from 'hono/cors'
 import { getSchemaVersion, type DB } from './db'
 import type { JobpinPaths } from './paths'
 import { registerJobRoutes } from './routes'
+import { registerEmailRoutes } from './email-routes'
 import type { AiRuntime } from './ai/runtime'
 import { registerAiRoutes } from './ai/routes'
 import { registerInterviewRoutes } from './ai/interview-routes'
@@ -36,6 +37,7 @@ export function createApp({ db, paths, version, ai }: AppDeps): Hono {
   app.get('/version', c => c.json({ app: 'jobpin', version }))
 
   registerJobRoutes(app, { db, paths })
+  registerEmailRoutes(app, { db, paths }) // no AI dependency - unlike the interview routes below
   if (ai) {
     registerAiRoutes(app, { db, paths, queue: ai.queue })
     registerInterviewRoutes(app, { db, paths, gateway: ai.gateway })

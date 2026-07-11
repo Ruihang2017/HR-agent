@@ -44,6 +44,11 @@ export interface EmailDetail {
   content: string
 }
 
+export interface CompanySettings {
+  name: string
+  senderName: string
+}
+
 function templatesDir(paths: JobpinPaths): string {
   return path.join(paths.companyDir, 'email_templates')
 }
@@ -192,6 +197,29 @@ export function listEmails(deps: EmailDeps, candidateId: number): EmailSummary[]
       'SELECT id, type, file_path AS filePath, created_at AS createdAt FROM emails WHERE candidate_id = ? ORDER BY created_at DESC, id DESC'
     )
     .all(candidateId) as EmailSummary[]
+}
+
+/** `company.name` / `company.sender_name` - the two settings keys `renderEmail` reads (above). */
+export function getCompanySettings(deps: EmailDeps): CompanySettings {
+  const { db } = deps
+  return { name: settingValue(db, 'company.name'), senderName: settingValue(db, 'company.sender_name') }
+}
+
+/**
+ * Partial update (each field optional/omittable): only keys present in `patch` are written,
+ * so a boss setting just the name never clobbers an already-set sender name. Same upsert
+ * pattern as `setAiSettings` (ai/settings.ts).
+ */
+export function setCompanySettings(deps: EmailDeps, patch: { name?: string; senderName?: string }): CompanySettings {
+  const { db } = deps
+  const put = db.prepare(
+    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')"
+  )
+  db.transaction(() => {
+    if (patch.name !== undefined) put.run('company.name', patch.name)
+    if (patch.senderName !== undefined) put.run('company.sender_name', patch.senderName)
+  })()
+  return getCompanySettings(deps)
 }
 
 export function getEmail(deps: EmailDeps, emailId: number): EmailDetail {
