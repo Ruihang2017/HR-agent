@@ -123,7 +123,14 @@ guess. App restart with queued work resumes it.
 `sensitive_flags` (11.1-2); every run snapshots (11.1-5); analysis never runs without an
 explicit boss action (token spend is boss-controlled).
 
-## 4. Interview loop & memory — Planned (P3), design intent
+## 4. Interview loop & memory — Designed (P3, spec `2026-07-11-phase-3-interview-loop-memory-design.md`)
+
+> Settled at the P3 design session: `interview_performance` is scored **only from items the boss
+> flagged affects-ranking** (none flagged → no factor); multiple simple rounds (latest round's
+> score ranks); interview AI ops are **direct awaited gateway calls** (the queue stays
+> analysis-only); ranking uses **per-candidate factor sets** (interviewed candidates score over
+> six renormalised factors, others over five — recorded per candidate in the snapshot criteria);
+> memory proposals are code-screened for protected attributes **before** the boss sees them.
 
 - **Before:** generate questions in five categories (standard · resume-specific · JD-risk ·
   boss-favourite · follow-ups) from `question_bank.json` + `learned_skills.md` + preferences;

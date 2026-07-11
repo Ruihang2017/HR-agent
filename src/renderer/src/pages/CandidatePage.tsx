@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { apiJson, ApiError } from '../api'
 import StatusBadge, { type Tone } from '../components/StatusBadge'
 
@@ -40,6 +40,10 @@ interface TaskRow {
   error: string | null
 }
 interface EnqueueResult { enqueued: number[]; skipped: { candidateId: number; reason: string }[] }
+interface InterviewListRow {
+  id: number; stage: number; createdAt: string; hasSummary: boolean
+  aiScore: number | null; bossDecision: string | null
+}
 
 const RECOMMENDATION_LABEL: Record<AnalysisOutput['recommendation'], string> = {
   strong_yes: 'Strong yes', yes: 'Yes', maybe: 'Maybe', no: 'No'
@@ -90,6 +94,7 @@ function DimensionCard({ label, judgment }: { label: string; judgment: Judgment 
 
 export default function CandidatePage() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const candidateId = Number(id)
   const [c, setC] = useState<CandidateDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -99,9 +104,32 @@ export default function CandidatePage() {
   const [triggerError, setTriggerError] = useState<string | null>(null)
   const pollTimer = useRef<number | undefined>(undefined)
 
+  const [interviews, setInterviews] = useState<InterviewListRow[]>([])
+  const [interviewsError, setInterviewsError] = useState<string | null>(null)
+  const [creatingInterview, setCreatingInterview] = useState(false)
+
   useEffect(() => {
     apiJson<CandidateDetail>(`/candidates/${candidateId}`).then(setC).catch(e => setError(e.message))
   }, [candidateId])
+
+  const fetchInterviews = useCallback(() => {
+    apiJson<InterviewListRow[]>(`/candidates/${candidateId}/interviews`)
+      .then(setInterviews)
+      .catch(e => setInterviewsError(e instanceof Error ? e.message : String(e)))
+  }, [candidateId])
+  useEffect(fetchInterviews, [fetchInterviews])
+
+  async function startInterview() {
+    setInterviewsError(null); setCreatingInterview(true)
+    try {
+      const res = await apiJson<{ interview: { id: number } }>(`/candidates/${candidateId}/interviews`, { method: 'POST' })
+      navigate(`/interviews/${res.interview.id}`)
+    } catch (e) {
+      setInterviewsError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setCreatingInterview(false)
+    }
+  }
 
   const fetchAnalysis = useCallback(() => {
     apiJson<AnalysisResp>(`/candidates/${candidateId}/analysis`)
@@ -201,6 +229,39 @@ export default function CandidatePage() {
           "Open folder" to view it.
         </div>
       )}
+
+      <div style={card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-3)' }}>
+          <h2 style={{ margin: 0, fontSize: 'var(--text-lg)' }}>Interviews</h2>
+          <button disabled={creatingInterview} onClick={startInterview}
+            style={{ ...actionBtn, opacity: creatingInterview ? 0.5 : 1 }}>
+            {creatingInterview ? 'Starting…' : 'New interview round'}
+          </button>
+        </div>
+
+        {interviewsError && <p style={{ color: 'var(--c-danger)', fontSize: 'var(--text-sm)' }}>{interviewsError}</p>}
+
+        {interviews.length === 0 ? (
+          <p style={{ color: 'var(--c-text-2)', margin: 0 }}>No interview rounds yet.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {interviews.map(iv => (
+              <Link key={iv.id} to={`/interviews/${iv.id}`} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: 'var(--sp-3) 0', borderTop: '1px solid var(--c-border)',
+                textDecoration: 'none', color: 'inherit'
+              }}>
+                <span>Round {iv.stage} · {iv.createdAt.slice(0, 10)}</span>
+                <span style={{ color: 'var(--c-text-2)', fontSize: 'var(--text-sm)', display: 'flex', gap: 'var(--sp-3)' }}>
+                  <span>AI score {iv.aiScore ?? '—'}</span>
+                  <span>Boss decision {iv.bossDecision ?? '—'}</span>
+                  <span>Summary {iv.hasSummary ? '✓' : '—'}</span>
+                </span>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div style={card}>
         <h2 style={{ margin: '0 0 var(--sp-3)', fontSize: 'var(--text-lg)' }}>Analysis</h2>

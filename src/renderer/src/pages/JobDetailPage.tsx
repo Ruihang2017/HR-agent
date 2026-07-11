@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiJson, apiUpload } from '../api'
-import StatusBadge from '../components/StatusBadge'
+import StatusBadge, { type Tone } from '../components/StatusBadge'
 
 interface JobDetail { id: number; name: string; folderPath: string; jd: string | null; createdAt: string }
 interface CandidateSummary { id: number; name: string; status: string; createdAt: string }
@@ -15,7 +15,12 @@ interface AnalysesResp { tasks: TaskRow[]; latestByCandidate: Record<number, num
 interface EnqueueResult { enqueued: number[]; skipped: { candidateId: number; reason: string }[] }
 
 interface RankingSummary { id: number; createdAt: string; candidateCount: number }
-interface RankingCriteria { factors: { key: string; base_weight: number; normalised_weight: number }[]; excluded: string[] }
+interface RankingPerCandidate { candidate_id: number; factors: string[]; interview_analysis_id?: number }
+interface RankingCriteria {
+  factors: { key: string; base_weight: number }[]
+  excluded: string[]
+  per_candidate?: RankingPerCandidate[]
+}
 interface RankingItem { candidateId: number; candidateName: string; rank: number; score: number; reason: string | null }
 interface RankingDetail { id: number; createdAt: string; reason: string | null; criteria: RankingCriteria; items: RankingItem[] }
 
@@ -25,6 +30,16 @@ interface RankResult {
   items: { candidateId: number; rank: number; score: number; reason: string }[]
   excluded: RankExcluded[]
 }
+
+// --- Memory (Task 11 / F7.1-F7.2) ---
+interface MemoryEvidence { quote: string; source: string }
+type MemoryStatus = 'pending' | 'approved' | 'rejected' | 'refused'
+interface MemoryEvent {
+  id: number; status: MemoryStatus; lesson: string; evidence: MemoryEvidence[]
+  refusalReason?: string; sourceInterviewId: number | null; createdAt: string
+}
+interface MemoryResp { learnedSkills: string; events: MemoryEvent[] }
+const MEMORY_STATUS_TONE: Record<MemoryStatus, Tone> = { pending: 'warn', approved: 'ok', rejected: 'danger', refused: 'danger' }
 
 type AnalysisState =
   | { kind: 'none' }
@@ -101,6 +116,11 @@ export default function JobDetailPage() {
   const [expandedRankingId, setExpandedRankingId] = useState<number | null>(null)
   const [expandedRanking, setExpandedRanking] = useState<RankingDetail | null>(null)
 
+  const [memory, setMemory] = useState<MemoryResp | null>(null)
+  const [memoryError, setMemoryError] = useState<string | null>(null)
+  const [proposalBusy, setProposalBusy] = useState<Record<number, boolean>>({})
+  const [proposalError, setProposalError] = useState<Record<number, string | null>>({})
+
   const refresh = useCallback(() => {
     apiJson<JobDetail>(`/jobs/${jobId}`).then(setJob).catch(e => setError(e.message))
     apiJson<CandidateSummary[]>(`/jobs/${jobId}/candidates`).then(setCands).catch(() => {})
@@ -130,6 +150,24 @@ export default function JobDetailPage() {
     apiJson<RankingSummary[]>(`/jobs/${jobId}/rankings`).then(setRankings).catch(() => {})
   }, [jobId])
   useEffect(refreshRankings, [refreshRankings])
+
+  const refreshMemory = useCallback(() => {
+    apiJson<MemoryResp>(`/jobs/${jobId}/memory`).then(setMemory).catch(e => setMemoryError(e.message))
+  }, [jobId])
+  useEffect(refreshMemory, [refreshMemory])
+
+  async function decideMemoryEvent(eventId: number, decision: 'approve' | 'reject') {
+    setProposalBusy(prev => ({ ...prev, [eventId]: true }))
+    setProposalError(prev => ({ ...prev, [eventId]: null }))
+    try {
+      await apiJson(`/memory-events/${eventId}/${decision}`, { method: 'POST' })
+      refreshMemory()
+    } catch (e) {
+      setProposalError(prev => ({ ...prev, [eventId]: e instanceof Error ? e.message : String(e) }))
+    } finally {
+      setProposalBusy(prev => ({ ...prev, [eventId]: false }))
+    }
+  }
 
   async function run(fn: () => Promise<unknown>) {
     setError(null)
@@ -403,23 +441,107 @@ export default function JobDetailPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {expandedRanking.items.map(it => (
-                          <tr key={it.candidateId} style={{ borderTop: '1px solid var(--c-border)' }}>
-                            <td style={{ padding: 'var(--sp-2)' }}>{it.rank}</td>
-                            <td style={{ padding: 'var(--sp-2)' }}>
-                              <Link to={`/candidates/${it.candidateId}`}>{it.candidateName}</Link>
-                            </td>
-                            <td style={{ padding: 'var(--sp-2)' }}>{it.score}</td>
-                            <td style={{ padding: 'var(--sp-2)', color: 'var(--c-text-2)' }}>{it.reason}</td>
-                          </tr>
-                        ))}
+                        {expandedRanking.items.map(it => {
+                          const pc = expandedRanking.criteria.per_candidate?.find(p => p.candidate_id === it.candidateId)
+                          return (
+                            <tr key={it.candidateId} style={{ borderTop: '1px solid var(--c-border)' }}>
+                              <td style={{ padding: 'var(--sp-2)' }}>{it.rank}</td>
+                              <td style={{ padding: 'var(--sp-2)' }}>
+                                <Link to={`/candidates/${it.candidateId}`}>{it.candidateName}</Link>
+                                {pc?.interview_analysis_id !== undefined && (
+                                  <span style={{ marginLeft: 'var(--sp-2)' }}>
+                                    <StatusBadge status="incl_interview" tone="accent" label="incl. interview" />
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ padding: 'var(--sp-2)' }}>{it.score}</td>
+                              <td style={{ padding: 'var(--sp-2)', color: 'var(--c-text-2)' }}>{it.reason}</td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
                     <p style={{ color: 'var(--c-text-2)', fontSize: 'var(--text-sm)', marginBottom: 0 }}>
-                      factors: {expandedRanking.criteria.factors.map(f => `${f.key} ${f.normalised_weight.toFixed(2)}`).join(', ')}
-                      {' · '}excluded: {expandedRanking.criteria.excluded.join(', ')}
+                      factors: {expandedRanking.criteria.factors.map(f => `${f.key.replaceAll('_', ' ')} ${f.base_weight.toFixed(2)}`).join(', ')}
+                      {' · '}excluded: {expandedRanking.criteria.excluded.join(', ') || 'none'}
+                      {(() => {
+                        const perCandidate = expandedRanking.criteria.per_candidate ?? []
+                        const distinctFactorSets = new Set(perCandidate.map(p => [...p.factors].sort().join('|')))
+                        return distinctFactorSets.size > 1
+                          ? ' · per-candidate factors (interview participation varies by candidate)'
+                          : null
+                      })()}
                     </p>
                   </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={card}>
+        <h2 style={{ margin: '0 0 var(--sp-3)', fontSize: 'var(--text-lg)' }}>Memory</h2>
+        {memoryError && <p style={{ color: 'var(--c-danger)', fontSize: 'var(--text-sm)' }}>{memoryError}</p>}
+
+        {memory && memory.events.some(ev => ev.status === 'pending') && (
+          <div style={{ marginBottom: 'var(--sp-4)' }}>
+            <h3 style={{ fontSize: 'var(--text-md)', margin: '0 0 var(--sp-2)' }}>Pending proposals</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+              {memory.events.filter(ev => ev.status === 'pending').map(ev => (
+                <div key={ev.id} style={{ border: '1px solid var(--c-border)', borderRadius: 'var(--radius-sm)', padding: 'var(--sp-3)' }}>
+                  <p style={{ margin: '0 0 var(--sp-2)' }}>{ev.lesson}</p>
+                  <ul style={{ margin: '0 0 var(--sp-2)', paddingLeft: 'var(--sp-5)', color: 'var(--c-text-2)', fontSize: 'var(--text-sm)' }}>
+                    {ev.evidence.map((e, i) => <li key={i}>“{e.quote}” [{e.source}]</li>)}
+                  </ul>
+                  <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+                    <button disabled={!!proposalBusy[ev.id]} onClick={() => decideMemoryEvent(ev.id, 'approve')} style={actionBtn}>Approve</button>
+                    <button disabled={!!proposalBusy[ev.id]} onClick={() => decideMemoryEvent(ev.id, 'reject')} style={actionBtn}>Reject</button>
+                  </div>
+                  {proposalError[ev.id] && <p style={{ color: 'var(--c-danger)', fontSize: 'var(--text-sm)', margin: 'var(--sp-2) 0 0' }}>{proposalError[ev.id]}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <h3 style={{ fontSize: 'var(--text-md)', margin: '0 0 var(--sp-2)' }}>learned_skills.md</h3>
+        {memory && memory.learnedSkills.trim() ? (
+          <pre style={{
+            whiteSpace: 'pre-wrap', fontFamily: 'inherit', background: 'var(--c-bg)',
+            border: '1px solid var(--c-border)', borderRadius: 'var(--radius-sm)',
+            padding: 'var(--sp-3)', margin: '0 0 var(--sp-4)'
+          }}>
+            {memory.learnedSkills}
+          </pre>
+        ) : (
+          <p style={{ color: 'var(--c-text-2)', margin: '0 0 var(--sp-4)' }}>
+            empty — approve proposals after interviews to build this job's memory
+          </p>
+        )}
+
+        <h3 style={{ fontSize: 'var(--text-md)', margin: '0 0 var(--sp-2)' }}>Event history</h3>
+        {!memory || memory.events.length === 0 ? (
+          <p style={{ color: 'var(--c-text-2)', margin: 0 }}>No memory events yet.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {memory.events.map(ev => (
+              <div key={ev.id} style={{ padding: 'var(--sp-3) 0', borderTop: '1px solid var(--c-border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 'var(--sp-2)' }}>
+                  <span>{ev.lesson || `event #${ev.id}`}</span>
+                  <StatusBadge status={ev.status} tone={MEMORY_STATUS_TONE[ev.status]} />
+                </div>
+                <p style={{ color: 'var(--c-text-2)', fontSize: 'var(--text-sm)', margin: 'var(--sp-1) 0 0' }}>
+                  {ev.createdAt.slice(0, 10)}
+                  {ev.sourceInterviewId !== null && ` · interview #${ev.sourceInterviewId}`}
+                </p>
+                {ev.status === 'refused' && ev.refusalReason && (
+                  <p style={{
+                    color: 'var(--c-warn-text)', background: 'var(--c-warn-bg)', padding: 'var(--sp-2) var(--sp-3)',
+                    borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-sm)', margin: 'var(--sp-2) 0 0'
+                  }}>
+                    {ev.refusalReason}
+                  </p>
                 )}
               </div>
             ))}

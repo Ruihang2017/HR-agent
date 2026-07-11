@@ -64,6 +64,150 @@ const factorJs = {
   },
   required: ['score', 'reason', 'evidence', 'confidence']
 }
+// --- Phase 3: interview pipelines -----------------------------------------------------
+
+export const InterviewEvidence = z.object({
+  quote: z.string().min(1),
+  source: z.enum(['interview', 'resume', 'jd'])
+}).strict()
+
+export const InterviewJudgment = z.object({
+  assessment: z.string().min(1),
+  evidence: z.array(InterviewEvidence).min(1),
+  confidence: Confidence
+}).strict()
+
+export const QuestionCategory = z.enum(['standard', 'resume_specific', 'jd_risk', 'boss_favourite', 'follow_up'])
+
+export const QuestionsOutput = z.object({
+  questions: z.array(z.object({
+    category: QuestionCategory,
+    text: z.string().min(1),
+    rationale: z.string().min(1)
+  }).strict()).min(5).max(25)
+}).strict()
+
+export const AnswerCommentOutput = z.object({
+  comment: z.string().min(1),
+  confidence: Confidence
+}).strict()
+
+export const InterviewFactorScore = z.object({
+  score: z.number().min(0).max(100),
+  reason: z.string().min(1),
+  evidence: z.array(InterviewEvidence).min(1),
+  confidence: Confidence
+}).strict()
+
+export const InterviewSummaryOutput = z.object({
+  summary: z.string().min(1),
+  soft_skill_observations: InterviewJudgment,
+  stability_inference: InterviewJudgment,
+  risk_points: z.array(InterviewJudgment),
+  recommended_follow_ups: z.array(z.string().min(1)).max(8),
+  next_round_recommendation: z.object({
+    verdict: z.enum(['advance', 'reject', 'another_round']),
+    reason: z.string().min(1)
+  }).strict(),
+  interview_performance: InterviewFactorScore.nullable(),
+  memory_proposals: z.array(z.object({
+    lesson: z.string().min(1),
+    evidence: z.array(InterviewEvidence).min(1)
+  }).strict()).max(5)
+}).strict()
+
+export type QuestionsOutputT = z.infer<typeof QuestionsOutput>
+export type AnswerCommentOutputT = z.infer<typeof AnswerCommentOutput>
+export type InterviewSummaryOutputT = z.infer<typeof InterviewSummaryOutput>
+
+// Hand-written structural mirrors for the interview pipelines - same discipline as ANALYSIS_JSON_SCHEMA.
+const interviewEvidenceJs = {
+  type: 'object', additionalProperties: false,
+  properties: { quote: { type: 'string' }, source: { type: 'string', enum: ['interview', 'resume', 'jd'] } },
+  required: ['quote', 'source']
+}
+const interviewJudgmentJs = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    assessment: { type: 'string' },
+    evidence: { type: 'array', items: interviewEvidenceJs },
+    confidence: { type: 'string', enum: ['low', 'medium', 'high'] }
+  },
+  required: ['assessment', 'evidence', 'confidence']
+}
+const interviewFactorJs = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    score: { type: 'number' }, reason: { type: 'string' },
+    evidence: { type: 'array', items: interviewEvidenceJs },
+    confidence: { type: 'string', enum: ['low', 'medium', 'high'] }
+  },
+  required: ['score', 'reason', 'evidence', 'confidence']
+}
+
+export const QUESTIONS_JSON_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    questions: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        properties: {
+          category: { type: 'string', enum: ['standard', 'resume_specific', 'jd_risk', 'boss_favourite', 'follow_up'] },
+          text: { type: 'string' },
+          rationale: { type: 'string' }
+        },
+        required: ['category', 'text', 'rationale']
+      }
+    }
+  },
+  required: ['questions']
+}
+
+export const ANSWER_COMMENT_JSON_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    comment: { type: 'string' },
+    confidence: { type: 'string', enum: ['low', 'medium', 'high'] }
+  },
+  required: ['comment', 'confidence']
+}
+
+export const INTERVIEW_SUMMARY_JSON_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    summary: { type: 'string' },
+    soft_skill_observations: interviewJudgmentJs,
+    stability_inference: interviewJudgmentJs,
+    risk_points: { type: 'array', items: interviewJudgmentJs },
+    recommended_follow_ups: { type: 'array', items: { type: 'string' } },
+    next_round_recommendation: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        verdict: { type: 'string', enum: ['advance', 'reject', 'another_round'] },
+        reason: { type: 'string' }
+      },
+      required: ['verdict', 'reason']
+    },
+    interview_performance: { anyOf: [interviewFactorJs, { type: 'null' }] },
+    memory_proposals: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        properties: {
+          lesson: { type: 'string' },
+          evidence: { type: 'array', items: interviewEvidenceJs }
+        },
+        required: ['lesson', 'evidence']
+      }
+    }
+  },
+  required: [
+    'summary', 'soft_skill_observations', 'stability_inference', 'risk_points',
+    'recommended_follow_ups', 'next_round_recommendation', 'interview_performance', 'memory_proposals'
+  ]
+}
+
 export const ANALYSIS_JSON_SCHEMA = {
   type: 'object', additionalProperties: false,
   properties: {

@@ -1,15 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 import type { DB } from '../db'
 import type { JobpinPaths } from '../paths'
 import { NotFoundError, ValidationError } from '../errors'
 import { ANALYSIS_JSON_SCHEMA, AnalysisOutput, type AnalysisOutputT } from './schemas'
 import { ANALYSIS_PROMPT_VERSION, buildAnalysisPrompt, type AnalysisMaterials } from './prompts'
 import type { Gateway } from './gateway'
+import { persistAiOutput, type ManifestEntry } from './persist'
 
 export interface AnalyzeDeps { db: DB; paths: JobpinPaths; gateway: Pick<Gateway, 'complete'> }
-
-interface ManifestEntry { kind: string; path: string; chars: number }
 
 const CONF = { low: 0.33, medium: 0.66, high: 1 } as const
 
@@ -22,12 +21,6 @@ export async function analyzeCandidate(deps: AnalyzeDeps, candidateId: number): 
   if (!cand) throw new NotFoundError(`candidate ${candidateId} not found`)
   const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(cand.job_id) as
     { id: number; name: string; folder_path: string; jd_path: string; inject_path: string }
-  const doc = db.prepare(
-    "SELECT * FROM candidate_documents WHERE candidate_id = ? AND type = 'resume'"
-  ).get(candidateId) as { file_path: string; extracted_text_path: string | null } | undefined
-  if (!doc?.extracted_text_path || !existsSync(abs(doc.extracted_text_path))) {
-    throw new ValidationError('no extracted text - resolve needs_review first')
-  }
 
   // --- assemble materials + provenance manifest ------------------------
   const manifest: ManifestEntry[] = []
@@ -52,10 +45,24 @@ export async function analyzeCandidate(deps: AnalyzeDeps, candidateId: number): 
     manifest.push({ kind: 'preferences', path: rel, chars: text.length })
     return text
   }
+  // Job-level configuration errors surface before candidate-level ones:
+  // a missing JD is fixed once for the whole job.
+  const jd = readRel('jd', job.jd_path) ?? ''
+  if (!jd.trim()) {
+    throw new ValidationError('job has no JD - add a job description before analysing')
+  }
+
+  const doc = db.prepare(
+    "SELECT * FROM candidate_documents WHERE candidate_id = ? AND type = 'resume'"
+  ).get(candidateId) as { file_path: string; extracted_text_path: string | null } | undefined
+  if (!doc?.extracted_text_path || !existsSync(abs(doc.extracted_text_path))) {
+    throw new ValidationError('no extracted text - resolve needs_review first')
+  }
+
   const materials: AnalysisMaterials = {
     jobName: job.name,
     candidateName: cand.name,
-    jd: readRel('jd', job.jd_path) ?? '',
+    jd,
     resumeText: readRel('resume', doc.extracted_text_path) ?? '',
     inject: readRel('inject', job.inject_path),
     values: readRel('values', 'company/values.md'),
@@ -68,9 +75,6 @@ export async function analyzeCandidate(deps: AnalyzeDeps, candidateId: number): 
       .filter(f => f.endsWith('.md'))
       .map(f => ({ name: f, text: readRel(`references/${f}`, `${refsDir}/${f}`) ?? '' }))
       .filter(r => r.text)
-  }
-  if (!materials.jd.trim()) {
-    throw new ValidationError('job has no JD - add a job description before analysing')
   }
 
   // --- model call happens BEFORE any DB write --------------------------
@@ -94,24 +98,11 @@ export async function analyzeCandidate(deps: AnalyzeDeps, candidateId: number): 
   )
 
   // --- persist row + versioned file + latest copy atomically -----------
-  let versionedRel = ''
-  const insert = db.transaction((): number => {
-    const info = db.prepare(
-      `INSERT INTO ai_analyses (job_id, candidate_id, kind, provider, model, prompt_version, input_manifest, output_path, confidence)
-       VALUES (?, ?, 'candidate_analysis', ?, ?, ?, ?, '', ?)`
-    ).run(job.id, candidateId, result.provider, result.model, ANALYSIS_PROMPT_VERSION, JSON.stringify(manifest), overallConfidence)
-    const id = Number(info.lastInsertRowid)
-    versionedRel = `${candFolder}/analyses/analysis_${id}.json`
-    mkdirSync(dirname(abs(versionedRel)), { recursive: true })
-    writeFileSync(abs(versionedRel), json)
-    writeFileSync(abs(`${candFolder}/ai_analysis.json`), json)
-    db.prepare('UPDATE ai_analyses SET output_path = ? WHERE id = ?').run(versionedRel, id)
-    return id
+  const { analysisId } = persistAiOutput({ db, paths }, {
+    jobId: job.id, candidateId, kind: 'candidate_analysis',
+    provider: result.provider, model: result.model, promptVersion: ANALYSIS_PROMPT_VERSION,
+    manifest, confidence: overallConfidence, outputJson: json,
+    candidateFolder: candFolder, alsoLatestCopyAs: 'ai_analysis.json'
   })
-  try {
-    return { analysisId: insert() }
-  } catch (e) {
-    if (versionedRel && existsSync(abs(versionedRel))) rmSync(abs(versionedRel), { force: true })
-    throw e
-  }
+  return { analysisId }
 }

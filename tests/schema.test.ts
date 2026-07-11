@@ -31,7 +31,7 @@ describe('migrations', () => {
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
       .all() as { name: string }[]).map(r => r.name).sort()
     expect(tables).toEqual(EXPECTED_TABLES)
-    expect(getSchemaVersion(db)).toBe(2)
+    expect(getSchemaVersion(db)).toBe(3)
   })
 
   it('creates an index on every FK column', () => {
@@ -44,7 +44,7 @@ describe('migrations', () => {
       'idx_candidate_documents_candidate_id', 'idx_candidates_job_id',
       'idx_documents_candidate_id', 'idx_emails_candidate_id',
       'idx_interview_answers_question_id', 'idx_interview_questions_interview_id',
-      'idx_interviews_candidate_id', 'idx_ranking_items_candidate_id',
+      'idx_interviews_candidate_id', 'idx_memory_events_scope', 'idx_ranking_items_candidate_id',
       'idx_ranking_items_ranking_id', 'idx_rankings_job_id',
       'idx_usage_events_created_at'
     ].sort())

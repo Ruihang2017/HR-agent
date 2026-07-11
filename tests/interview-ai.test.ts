@@ -1,0 +1,460 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { getPaths, type JobpinPaths } from '../src/server/paths'
+import { ensureScaffold } from '../src/server/scaffold'
+import { openDatabase, runMigrations, type DB } from '../src/server/db'
+import { migrations } from '../src/server/migrations'
+import { createJob } from '../src/server/jobs'
+import { addCandidateFromFile, addCandidateFromText } from '../src/server/candidates'
+import { createInterview, addQuestion, saveAnswer, type InterviewDeps } from '../src/server/interviews'
+import { NotFoundError, ValidationError, ConflictError } from '../src/server/errors'
+import { analyzeCandidate, type AnalyzeDeps } from '../src/server/ai/analyze'
+import { generateQuestions, commentOnAnswer, summariseInterview, type InterviewAiDeps } from '../src/server/ai/interview-ai'
+import { validQuestionsFixture, validCommentFixture, validSummaryFixture } from './fixtures/interview-output'
+import { validAnalysisFixture } from './fixtures/analysis-output'
+import { rmrfWithRetry } from './helpers'
+
+const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures')
+const read = (f: string) => new Uint8Array(fs.readFileSync(path.join(fixtures, f)))
+
+interface Captured { system: string; user: string; kind: string; jobId?: number; candidateId?: number }
+
+let tmp: string
+let db: DB
+let paths: JobpinPaths
+let jobId: number
+let jobFolder: string
+let captured: Captured[]
+let questionsToReturn: ReturnType<typeof validQuestionsFixture>
+let nextOutput: unknown
+let deps: InterviewAiDeps
+let interviewDeps: InterviewDeps
+
+beforeEach(() => {
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jobpin-interview-ai-'))
+  paths = getPaths(tmp)
+  ensureScaffold(paths)
+  db = openDatabase(paths.dbFile)
+  runMigrations(db, migrations)
+  const job = createJob({ db, paths }, 'Barista', 'We need a friendly, reliable barista.')
+  jobId = job.id
+  jobFolder = job.folderPath
+  captured = []
+  questionsToReturn = validQuestionsFixture()
+  nextOutput = undefined
+  interviewDeps = { db, paths }
+  deps = {
+    db,
+    paths,
+    gateway: {
+      complete: async (req) => {
+        captured.push(req)
+        return {
+          output: nextOutput ?? questionsToReturn,
+          provider: 'openai',
+          model: 'gpt-5-mini',
+          usage: { prompt: 1, completion: 1 }
+        }
+      }
+    }
+  }
+})
+
+afterEach(() => {
+  db.close()
+  rmrfWithRetry(tmp)
+})
+
+describe('generateQuestions', () => {
+  it('happy path: inserts rows in order, records provenance with full manifest, mirrors the record, returns added/dropped', async () => {
+    fs.writeFileSync(
+      path.join(tmp, jobFolder, 'question_bank.json'),
+      JSON.stringify({ questions: [{ text: 'What would you do in week one?', addedAt: '2026-01-01T00:00:00Z' }] }),
+      'utf8'
+    )
+    const c = await addCandidateFromText({ db, paths }, jobId, 'Pat', 'Ten years of sales.')
+    const interview = createInterview(interviewDeps, c.id)
+
+    const result = await generateQuestions(deps, interview.id)
+    expect(result).toEqual({ added: 5, dropped: [] })
+
+    const rows = db
+      .prepare('SELECT order_index, category, text, source FROM interview_questions WHERE interview_id = ? ORDER BY order_index ASC')
+      .all(interview.id) as { order_index: number; category: string; text: string; source: string }[]
+    expect(rows).toHaveLength(5)
+    expect(rows.map(r => r.category)).toEqual(['standard', 'resume_specific', 'jd_risk', 'boss_favourite', 'follow_up'])
+    expect(rows.map(r => r.text)).toEqual(questionsToReturn.questions.map((q: { text: string }) => q.text))
+    for (const r of rows) expect(r.source).toBe('generated')
+
+    const analysisRow = db
+      .prepare("SELECT * FROM ai_analyses WHERE candidate_id = ? AND kind = 'question_generation'")
+      .get(c.id) as {
+      id: number; provider: string; model: string; prompt_version: string
+      input_manifest: string; output_path: string; confidence: number | null
+    }
+    expect(analysisRow.provider).toBe('openai')
+    expect(analysisRow.model).toBe('gpt-5-mini')
+    expect(analysisRow.prompt_version).toBe('question-generation/v1')
+    expect(analysisRow.confidence).toBeNull()
+    expect(analysisRow.output_path).not.toBe('')
+    expect(analysisRow.output_path).not.toMatch(/\\/)
+
+    const versionedAbs = path.join(tmp, analysisRow.output_path)
+    expect(fs.existsSync(versionedAbs)).toBe(true)
+    const versioned = JSON.parse(fs.readFileSync(versionedAbs, 'utf8'))
+    expect(versioned.questions).toEqual(questionsToReturn.questions)
+
+    const kinds = (JSON.parse(analysisRow.input_manifest) as { kind: string }[]).map(m => m.kind)
+    expect(kinds).toContain('jd')
+    expect(kinds).toContain('resume')
+    expect(kinds).toContain('bank')
+
+    const recordAbs = path.join(tmp, jobFolder, 'candidates', `candidate_${c.id}`, 'interviews', `round-${interview.stage}-record.json`)
+    const record = JSON.parse(fs.readFileSync(recordAbs, 'utf8')) as { items: { text: string; source: string }[] }
+    expect(record.items).toHaveLength(5)
+    for (const item of record.items) expect(item.source).toBe('generated')
+  })
+
+  it('filter: drops a planted protected-attribute question, inserts the rest, and reports the drop', async () => {
+    const base = validQuestionsFixture()
+    base.questions.push({ category: 'standard', text: 'How old are you?', rationale: 'Curious about tenure.' })
+    questionsToReturn = base
+
+    const c = await addCandidateFromText({ db, paths }, jobId, 'Pat', 'Ten years of sales.')
+    const interview = createInterview(interviewDeps, c.id)
+
+    const result = await generateQuestions(deps, interview.id)
+    expect(result.added).toBe(5)
+    expect(result.dropped).toEqual([{ text: 'How old are you?', terms: ['age'] }])
+
+    const rows = db
+      .prepare('SELECT text FROM interview_questions WHERE interview_id = ?')
+      .all(interview.id) as { text: string }[]
+    expect(rows.map(r => r.text)).not.toContain('How old are you?')
+    expect(rows).toHaveLength(5)
+  })
+
+  it('a second generation call conflicts; a prior manual question does not block generation', async () => {
+    const c = await addCandidateFromText({ db, paths }, jobId, 'Pat', 'Ten years of sales.')
+    const interview = createInterview(interviewDeps, c.id)
+    addQuestion(interviewDeps, interview.id, { text: 'Manually added question', category: 'standard' })
+
+    await expect(generateQuestions(deps, interview.id)).resolves.toEqual({ added: 5, dropped: [] })
+    await expect(generateQuestions(deps, interview.id)).rejects.toThrow(ConflictError)
+    await expect(generateQuestions(deps, interview.id)).rejects.toThrow(/questions already generated - add manually or start a new round/)
+  })
+
+  it('rejects with ValidationError when the job has no JD', async () => {
+    const jobNoJd = createJob({ db, paths }, 'No JD Job')
+    const c = await addCandidateFromText({ db, paths }, jobNoJd.id, 'Pat', 'Ten years of sales.')
+    const interview = createInterview(interviewDeps, c.id)
+    await expect(generateQuestions(deps, interview.id)).rejects.toThrow(ValidationError)
+    await expect(generateQuestions(deps, interview.id)).rejects.toThrow(/no JD/)
+  })
+
+  it('rejects with ValidationError when the candidate has no extracted text', async () => {
+    const c = await addCandidateFromFile({ db, paths }, jobId, 'corrupt.pdf', read('corrupt.pdf'))
+    expect(c.status).toBe('needs_review')
+    const interview = createInterview(interviewDeps, c.id)
+    await expect(generateQuestions(deps, interview.id)).rejects.toThrow(ValidationError)
+    await expect(generateQuestions(deps, interview.id)).rejects.toThrow(/no extracted text/)
+  })
+
+  it('rejects with NotFoundError for an unknown interview', async () => {
+    await expect(generateQuestions(deps, 999)).rejects.toThrow(NotFoundError)
+  })
+
+  it('guard order: no JD AND no extracted text surfaces the job-level JD error first', async () => {
+    const jobNoJd = createJob({ db, paths }, 'No JD Job')
+    const c = await addCandidateFromFile({ db, paths }, jobNoJd.id, 'corrupt.pdf', read('corrupt.pdf'))
+    expect(c.status).toBe('needs_review')
+    const interview = createInterview(interviewDeps, c.id)
+    await expect(generateQuestions(deps, interview.id)).rejects.toThrow(ValidationError)
+    await expect(generateQuestions(deps, interview.id)).rejects.toThrow(/no JD/)
+  })
+
+  it('bank round-trip: an empty bank omits the QUESTION BANK block; a seeded bank includes it', async () => {
+    const c1 = await addCandidateFromText({ db, paths }, jobId, 'Pat', 'Ten years of sales.')
+    const interview1 = createInterview(interviewDeps, c1.id)
+    await generateQuestions(deps, interview1.id)
+    expect(captured[captured.length - 1].user).not.toContain('=== QUESTION BANK ===')
+
+    fs.writeFileSync(
+      path.join(tmp, jobFolder, 'question_bank.json'),
+      JSON.stringify({ questions: ['What would you do first?'] }),
+      'utf8'
+    )
+    const c2 = await addCandidateFromText({ db, paths }, jobId, 'Sam', 'Five years in retail.')
+    const interview2 = createInterview(interviewDeps, c2.id)
+    await generateQuestions(deps, interview2.id)
+    const req2 = captured[captured.length - 1]
+    expect(req2.user).toContain('=== QUESTION BANK ===')
+    expect(req2.user).toContain('What would you do first?')
+  })
+
+  it('prior candidate_analysis output (summary, risk points, recommended questions) flows into the prompt when present', async () => {
+    const analyzeDeps: AnalyzeDeps = {
+      db, paths,
+      gateway: {
+        complete: async () => ({
+          output: validAnalysisFixture(),
+          provider: 'openai', model: 'gpt-5-mini', usage: { prompt: 1, completion: 1 }
+        })
+      }
+    }
+    const c = await addCandidateFromText({ db, paths }, jobId, 'Pat', 'Ten years of sales.')
+    await analyzeCandidate(analyzeDeps, c.id)
+    const interview = createInterview(interviewDeps, c.id)
+
+    await generateQuestions(deps, interview.id)
+    const req = captured[captured.length - 1]
+    expect(req.user).toContain('=== PRIOR ANALYSIS SUMMARY ===')
+    expect(req.user).toContain(validAnalysisFixture().summary)
+    expect(req.user).toContain('=== PRIOR ANALYSIS RISK POINTS ===')
+    expect(req.user).toContain('=== PRIOR ANALYSIS RECOMMENDED QUESTIONS ===')
+
+    const analysisRow = db
+      .prepare("SELECT input_manifest FROM ai_analyses WHERE candidate_id = ? AND kind = 'question_generation'")
+      .get(c.id) as { input_manifest: string }
+    const kinds = (JSON.parse(analysisRow.input_manifest) as { kind: string }[]).map(m => m.kind)
+    expect(kinds).toContain('analysis')
+  })
+})
+
+async function setupAnsweredCandidate(text = 'How do you handle conflict?') {
+  const c = await addCandidateFromText({ db, paths }, jobId, 'Pat', 'Ten years of sales.')
+  const interview = createInterview(interviewDeps, c.id)
+  const q = addQuestion(interviewDeps, interview.id, { text, category: 'standard' })
+  return { c, interview, q }
+}
+
+async function setupInterviewWithAnswers() {
+  const c = await addCandidateFromText({ db, paths }, jobId, 'Pat', 'Ten years of sales.')
+  const interview = createInterview(interviewDeps, c.id)
+  const q1 = addQuestion(interviewDeps, interview.id, { text: 'How do you handle conflict?', category: 'standard' })
+  saveAnswer(interviewDeps, q1.id, { answerText: 'I ran the weekend schedule myself for two years.', affectsRanking: true })
+  const q2 = addQuestion(interviewDeps, interview.id, { text: 'Tell me about a project.', category: 'follow_up' })
+  saveAnswer(interviewDeps, q2.id, { answerText: 'I led the POS migration end to end.' })
+  return { c, interview, q1, q2 }
+}
+
+describe('commentOnAnswer', () => {
+  it('stores the comment + mapped confidence, records provenance, and mirrors the record', async () => {
+    const { q, interview, c } = await setupAnsweredCandidate()
+    saveAnswer(interviewDeps, q.id, { answerText: 'I stay calm and listen.', affectsRanking: true })
+    nextOutput = validCommentFixture()
+
+    const result = await commentOnAnswer(deps, q.id)
+    expect(result.comment).toBe(validCommentFixture().comment)
+    expect(result.confidence).toBe('medium')
+
+    const answerRow = db
+      .prepare('SELECT ai_comment, confidence FROM interview_answers WHERE interview_question_id = ?')
+      .get(q.id) as { ai_comment: string; confidence: number }
+    expect(answerRow.ai_comment).toBe(validCommentFixture().comment)
+    expect(answerRow.confidence).toBeCloseTo(0.66, 5)
+
+    const provenanceRows = db
+      .prepare("SELECT provider, model, prompt_version FROM ai_analyses WHERE candidate_id = ? AND kind = 'answer_comment'")
+      .all(c.id) as { provider: string; model: string; prompt_version: string }[]
+    expect(provenanceRows).toHaveLength(1)
+    expect(provenanceRows[0].provider).toBe('openai')
+    expect(provenanceRows[0].prompt_version).toBe('answer-comment/v1')
+
+    expect(captured[captured.length - 1].kind).toBe('answer_comment')
+
+    const recordAbs = path.join(tmp, jobFolder, 'candidates', `candidate_${c.id}`, 'interviews', `round-${interview.stage}-record.json`)
+    const record = JSON.parse(fs.readFileSync(recordAbs, 'utf8')) as { items: { answer: { aiComment: string | null } | null }[] }
+    expect(record.items.some(i => i.answer?.aiComment === validCommentFixture().comment)).toBe(true)
+  })
+
+  it('rejects with ValidationError when there is no answer yet, and when the answer text is blank', async () => {
+    const { q } = await setupAnsweredCandidate()
+    await expect(commentOnAnswer(deps, q.id)).rejects.toThrow(ValidationError)
+    await expect(commentOnAnswer(deps, q.id)).rejects.toThrow(/answer the question before asking for an AI take/)
+
+    saveAnswer(interviewDeps, q.id, { answerText: '   ' })
+    await expect(commentOnAnswer(deps, q.id)).rejects.toThrow(ValidationError)
+  })
+
+  it('rejects with NotFoundError for an unknown question', async () => {
+    await expect(commentOnAnswer(deps, 999)).rejects.toThrow(NotFoundError)
+  })
+
+  it('re-commenting overwrites the stored fields and adds a new provenance row', async () => {
+    const { q, c } = await setupAnsweredCandidate()
+    saveAnswer(interviewDeps, q.id, { answerText: 'I stay calm and listen.' })
+    nextOutput = validCommentFixture()
+    await commentOnAnswer(deps, q.id)
+
+    nextOutput = { comment: 'Updated take: even stronger example the second time.', confidence: 'high' }
+    const second = await commentOnAnswer(deps, q.id)
+    expect(second.comment).toBe('Updated take: even stronger example the second time.')
+    expect(second.confidence).toBe('high')
+
+    const answerRow = db
+      .prepare('SELECT ai_comment, confidence FROM interview_answers WHERE interview_question_id = ?')
+      .get(q.id) as { ai_comment: string; confidence: number }
+    expect(answerRow.ai_comment).toBe('Updated take: even stronger example the second time.')
+    expect(answerRow.confidence).toBeCloseTo(1, 5)
+
+    const rows = db.prepare("SELECT id FROM ai_analyses WHERE candidate_id = ? AND kind = 'answer_comment'").all(c.id)
+    expect(rows).toHaveLength(2)
+  })
+})
+
+describe('summariseInterview', () => {
+  it('happy path: renders the summary md with the verdict, sets summary_path/ai_score, records provenance, inserts pending proposals', async () => {
+    const { c, interview } = await setupInterviewWithAnswers()
+    nextOutput = validSummaryFixture()
+
+    const result = await summariseInterview(deps, interview.id)
+    expect(result.output.summary).toBe(validSummaryFixture().summary)
+    expect(result.proposals).toHaveLength(2)
+    for (const p of result.proposals) expect(p.status).toBe('pending')
+
+    const row = db
+      .prepare('SELECT summary_path, ai_score FROM interviews WHERE id = ?')
+      .get(interview.id) as { summary_path: string | null; ai_score: number | null }
+    expect(row.summary_path).not.toBeNull()
+    expect(row.ai_score).toBe(78)
+
+    const mdAbs = path.join(tmp, row.summary_path as string)
+    expect(fs.existsSync(mdAbs)).toBe(true)
+    const md = fs.readFileSync(mdAbs, 'utf8')
+    expect(md).toContain(`# Interview round ${interview.stage} — Pat`)
+    expect(md).toContain('**advance**')
+
+    const analysisRow = db
+      .prepare("SELECT kind, output_path FROM ai_analyses WHERE candidate_id = ? AND kind = 'interview_summary'")
+      .get(c.id) as { kind: string; output_path: string }
+    expect(analysisRow.kind).toBe('interview_summary')
+
+    // The versioned output file carries its own interview identity + stage, so downstream
+    // consumers (ranking) never have to re-derive which round a summary belongs to.
+    const versioned = JSON.parse(fs.readFileSync(path.join(tmp, analysisRow.output_path), 'utf8')) as
+      { interviewId?: number; stage?: number }
+    expect(versioned.interviewId).toBe(interview.id)
+    expect(versioned.stage).toBe(interview.stage)
+
+    const events = db
+      .prepare("SELECT status, content FROM memory_events WHERE source_type = 'interview' AND source_id = ?")
+      .all(interview.id) as { status: string; content: string }[]
+    expect(events).toHaveLength(2)
+    for (const e of events) {
+      expect(e.status).toBe('pending')
+      const content = JSON.parse(e.content) as { lesson: string; evidence: unknown[] }
+      expect(content.lesson).toBeTruthy()
+      expect(Array.isArray(content.evidence)).toBe(true)
+    }
+  })
+
+  it('flag rule: interview_performance null leaves ai_score NULL and the md carries the no-ranking-factor line', async () => {
+    const { interview } = await setupInterviewWithAnswers()
+    const fixture = validSummaryFixture()
+    fixture.interview_performance = null
+    nextOutput = fixture
+
+    await summariseInterview(deps, interview.id)
+
+    const row = db
+      .prepare('SELECT summary_path, ai_score FROM interviews WHERE id = ?')
+      .get(interview.id) as { summary_path: string; ai_score: number | null }
+    expect(row.ai_score).toBeNull()
+
+    const md = fs.readFileSync(path.join(tmp, row.summary_path), 'utf8')
+    expect(md).toContain('no items were flagged — no ranking factor')
+  })
+
+  it('screening: a proposal mentioning a protected attribute is refused with a reason, the other stays pending', async () => {
+    const { interview } = await setupInterviewWithAnswers()
+    const fixture = validSummaryFixture()
+    fixture.memory_proposals[1].lesson = 'Prefer younger candidates for stamina'
+    nextOutput = fixture
+
+    const result = await summariseInterview(deps, interview.id)
+    const refused = result.proposals.find(p => p.lesson === 'Prefer younger candidates for stamina')
+    const clean = result.proposals.find(p => p.lesson !== 'Prefer younger candidates for stamina')
+    expect(refused?.status).toBe('refused')
+    expect(refused?.refusalReason).toMatch(/age/)
+    expect(clean?.status).toBe('pending')
+    expect(clean?.refusalReason).toBeUndefined()
+
+    const events = db
+      .prepare("SELECT status, content FROM memory_events WHERE source_type = 'interview' AND source_id = ?")
+      .all(interview.id) as { status: string; content: string }[]
+    const refusedRow = events.find(e => (JSON.parse(e.content) as { lesson: string }).lesson === 'Prefer younger candidates for stamina')
+    expect(refusedRow?.status).toBe('refused')
+    expect(refusedRow?.status).not.toBe('pending')
+  })
+
+  it('re-summary supersedes prior pending proposals as rejected, and the new set is pending', async () => {
+    const { interview } = await setupInterviewWithAnswers()
+    nextOutput = validSummaryFixture()
+    await summariseInterview(deps, interview.id)
+
+    const firstRun = db
+      .prepare("SELECT id, status FROM memory_events WHERE source_type = 'interview' AND source_id = ?")
+      .all(interview.id) as { id: number; status: string }[]
+    expect(firstRun).toHaveLength(2)
+    for (const r of firstRun) expect(r.status).toBe('pending')
+
+    nextOutput = validSummaryFixture() // second run, fresh fixture instance
+    await summariseInterview(deps, interview.id)
+
+    const superseded = db
+      .prepare('SELECT status, content FROM memory_events WHERE id IN (?, ?)')
+      .all(firstRun[0].id, firstRun[1].id) as { status: string; content: string }[]
+    for (const s of superseded) {
+      expect(s.status).toBe('rejected')
+      expect((JSON.parse(s.content) as { refusalReason: string }).refusalReason).toBe('superseded by re-summary')
+    }
+
+    const all = db
+      .prepare("SELECT status FROM memory_events WHERE source_type = 'interview' AND source_id = ?")
+      .all(interview.id) as { status: string }[]
+    expect(all).toHaveLength(4)
+    expect(all.filter(r => r.status === 'pending')).toHaveLength(2)
+    expect(all.filter(r => r.status === 'rejected')).toHaveLength(2)
+  })
+
+  it('I-2: code-enforces the no-ranking-factor invariant even when the model returns a non-null factor with nothing flagged', async () => {
+    const c = await addCandidateFromText({ db, paths }, jobId, 'Pat', 'Ten years of sales.')
+    const interview = createInterview(interviewDeps, c.id)
+    const q1 = addQuestion(interviewDeps, interview.id, { text: 'How do you handle conflict?', category: 'standard' })
+    saveAnswer(interviewDeps, q1.id, { answerText: 'I ran the weekend schedule myself for two years.' }) // affectsRanking left false
+    nextOutput = validSummaryFixture() // interview_performance is non-null, but nothing on the round is flagged
+
+    const result = await summariseInterview(deps, interview.id)
+    expect(result.output.interview_performance).toBeNull()
+
+    const row = db
+      .prepare('SELECT summary_path, ai_score FROM interviews WHERE id = ?')
+      .get(interview.id) as { summary_path: string; ai_score: number | null }
+    expect(row.ai_score).toBeNull()
+
+    const md = fs.readFileSync(path.join(tmp, row.summary_path), 'utf8')
+    expect(md).toContain('no items were flagged — no ranking factor')
+
+    const analysisRow = db
+      .prepare("SELECT output_path FROM ai_analyses WHERE candidate_id = ? AND kind = 'interview_summary'")
+      .get(c.id) as { output_path: string }
+    const persisted = JSON.parse(fs.readFileSync(path.join(tmp, analysisRow.output_path), 'utf8')) as { interview_performance: unknown }
+    expect(persisted.interview_performance).toBeNull()
+  })
+
+  it('rejects with ConflictError when zero items have been answered', async () => {
+    const c = await addCandidateFromText({ db, paths }, jobId, 'Pat', 'Ten years of sales.')
+    const interview = createInterview(interviewDeps, c.id)
+    addQuestion(interviewDeps, interview.id, { text: 'How do you handle conflict?', category: 'standard' })
+    await expect(summariseInterview(deps, interview.id)).rejects.toThrow(ConflictError)
+    await expect(summariseInterview(deps, interview.id)).rejects.toThrow(/record at least one answer before summarising/)
+  })
+
+  it('rejects with NotFoundError for an unknown interview', async () => {
+    await expect(summariseInterview(deps, 999)).rejects.toThrow(NotFoundError)
+  })
+})
