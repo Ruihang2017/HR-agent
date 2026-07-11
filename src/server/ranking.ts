@@ -4,22 +4,31 @@ import type { DB } from './db'
 import type { JobpinPaths } from './paths'
 import { NotFoundError, ValidationError } from './errors'
 import { ANALYSIS_PROMPT_VERSION } from './ai/prompts'
-import type { AnalysisOutputT } from './ai/schemas'
+import type { AnalysisOutputT, InterviewSummaryOutputT } from './ai/schemas'
 
 export const RANKING_WEIGHTS = {
   jd_fit: 0.35,
   key_skills: 0.25,
   relevant_experience: 0.2,
   growth_trajectory: 0.1,
-  boss_preference_match: 0.1
+  boss_preference_match: 0.1,
+  interview_performance: 0.2
 } as const
 
 type FactorKey = keyof typeof RANKING_WEIGHTS
+// The five factors sourced from candidate_analysis output; interview_performance is
+// sourced separately (per candidate, from that candidate's latest interview_summary).
+type BaseFactorKey = Exclude<FactorKey, 'interview_performance'>
+const BASE_FACTOR_KEYS = (Object.keys(RANKING_WEIGHTS) as FactorKey[]).filter(
+  (k): k is BaseFactorKey => k !== 'interview_performance'
+)
 
 interface LatestAnalysis {
   candidateId: number; analysisId: number; provider: string; model: string
   output: AnalysisOutputT
 }
+
+interface InterviewInfo { analysisId: number; score: number; stage: number }
 
 export function runRanking(deps: { db: DB; paths: JobpinPaths }, jobId: number): {
   rankingId: number
@@ -48,32 +57,75 @@ export function runRanking(deps: { db: DB; paths: JobpinPaths }, jobId: number):
   if (analysed.length === 0) throw new ValidationError('no analysed candidates to rank')
 
   // boss_preference_match participates only if EVERY analysis has it (comparability).
+  // This remains a RUN-LEVEL, all-or-none rule — unlike interview_performance below, which
+  // is decided per candidate.
   const everyHasPrefs = analysed.every(a => a.output.factors.boss_preference_match !== null)
-  const activeKeys = (Object.keys(RANKING_WEIGHTS) as FactorKey[]).filter(
-    k => k !== 'boss_preference_match' || everyHasPrefs
+  const baseActiveKeys = BASE_FACTOR_KEYS.filter(k => k !== 'boss_preference_match' || everyHasPrefs)
+
+  // Per candidate: latest interview_summary analysis whose output carries a non-null
+  // interview_performance. "Latest" only — an older summary with a score never overrides
+  // a newer summary that flagged nothing (task-8 brief case 5).
+  const interviewStmt = db.prepare(
+    `SELECT id, output_path FROM ai_analyses
+     WHERE candidate_id=? AND kind='interview_summary' AND output_path != ''
+     ORDER BY id DESC LIMIT 1`
   )
-  const weightSum = activeKeys.reduce((s, k) => s + RANKING_WEIGHTS[k], 0)
-  const normalised = Object.fromEntries(activeKeys.map(k => [k, RANKING_WEIGHTS[k] / weightSum])) as Record<FactorKey, number>
+  const stageStmt = db.prepare(
+    `SELECT stage FROM interviews WHERE candidate_id=? AND summary_path IS NOT NULL ORDER BY id DESC LIMIT 1`
+  )
+  const interviewByCandidate = new Map<number, InterviewInfo | undefined>()
+  for (const a of analysed) {
+    const row = interviewStmt.get(a.candidateId) as { id: number; output_path: string } | undefined
+    if (!row) { interviewByCandidate.set(a.candidateId, undefined); continue }
+    const output = JSON.parse(readFileSync(join(paths.dataRoot, row.output_path), 'utf8')) as InterviewSummaryOutputT
+    if (!output.interview_performance) { interviewByCandidate.set(a.candidateId, undefined); continue }
+    const stageRow = stageStmt.get(a.candidateId) as { stage: number } | undefined
+    if (!stageRow) { interviewByCandidate.set(a.candidateId, undefined); continue }
+    interviewByCandidate.set(a.candidateId, { analysisId: row.id, score: output.interview_performance.score, stage: stageRow.stage })
+  }
+  const anyHasInterview = [...interviewByCandidate.values()].some(v => v !== undefined)
 
   const scored = analysed.map(a => {
-    const total = activeKeys.reduce((sum, k) => sum + normalised[k] * a.output.factors[k]!.score, 0)
-    const best = activeKeys.reduce((m, k) => (a.output.factors[k]!.score > a.output.factors[m]!.score ? k : m), activeKeys[0])
+    const interview = interviewByCandidate.get(a.candidateId)
+    const activeKeys: FactorKey[] = interview ? [...baseActiveKeys, 'interview_performance'] : [...baseActiveKeys]
+    const weightSum = activeKeys.reduce((s, k) => s + RANKING_WEIGHTS[k], 0)
+    // Renormalisation is per candidate, over that candidate's own present factors.
+    const normalised = Object.fromEntries(activeKeys.map(k => [k, RANKING_WEIGHTS[k] / weightSum])) as Record<FactorKey, number>
+    const scoreOf = (k: FactorKey): number => (k === 'interview_performance' ? interview!.score : a.output.factors[k as BaseFactorKey]!.score)
+
+    const total = activeKeys.reduce((sum, k) => sum + normalised[k] * scoreOf(k), 0)
+    const best = activeKeys.reduce((m, k) => (scoreOf(k) > scoreOf(m) ? k : m), activeKeys[0])
     const firstSentence = a.output.summary.split('. ')[0].replace(/\.$/, '')
+    let reason = `${firstSentence}. Strongest factor: ${best.replaceAll('_', ' ')} (${scoreOf(best)}).`
+    if (interview) reason += ` Interview round ${interview.stage}: ${interview.score}.`
     return {
       candidateId: a.candidateId,
       analysisId: a.analysisId,
+      interviewAnalysisId: interview?.analysisId,
+      activeKeys,
       score: Math.round(total * 10) / 10,
-      reason: `${firstSentence}. Strongest factor: ${best.replaceAll('_', ' ')} (${a.output.factors[best]!.score}).`
+      reason
     }
   })
   const order = new Map(candidates.map((c, i) => [c.id, i]))
   scored.sort((a, b) => b.score - a.score || order.get(a.candidateId)! - order.get(b.candidateId)!)
 
+  const excludedFactors = [
+    ...(anyHasInterview ? [] : ['interview_performance']),
+    ...(everyHasPrefs ? [] : ['boss_preference_match'])
+  ]
+  const runLevelFactorKeys = (Object.keys(RANKING_WEIGHTS) as FactorKey[]).filter(k => !excludedFactors.includes(k))
+
   const criteria = {
     prompt_version_expected: ANALYSIS_PROMPT_VERSION,
-    factors: activeKeys.map(k => ({ key: k, base_weight: RANKING_WEIGHTS[k], normalised_weight: Math.round(normalised[k] * 10000) / 10000 })),
-    excluded: ['interview_performance', ...(everyHasPrefs ? [] : ['boss_preference_match'])],
-    inputs: analysed.map(a => ({ candidate_id: a.candidateId, analysis_id: a.analysisId, provider: a.provider, model: a.model }))
+    factors: runLevelFactorKeys.map(k => ({ key: k, base_weight: RANKING_WEIGHTS[k] })),
+    excluded: excludedFactors,
+    inputs: analysed.map(a => ({ candidate_id: a.candidateId, analysis_id: a.analysisId, provider: a.provider, model: a.model })),
+    per_candidate: scored.map(s => ({
+      candidate_id: s.candidateId,
+      factors: s.activeKeys,
+      ...(s.interviewAnalysisId !== undefined ? { interview_analysis_id: s.interviewAnalysisId } : {})
+    }))
   }
 
   const rankingId = db.transaction((): number => {
