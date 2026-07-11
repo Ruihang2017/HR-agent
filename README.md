@@ -108,3 +108,37 @@ validates the JSON shape, prints a provider × resume factor-score matrix, and f
 sensitive-vs-scrubbed factor delta greater than 10 points. Each `--yes` run is real,
 billed API traffic — the script prints the exact call count up front and requires `--yes`
 to proceed. Results are written to `docs/superpowers/evals/<date>-phase-2-eval.md`.
+
+### Emails (Phase 4)
+
+Each candidate's page can generate offer/rejection/interview-invite email templates from the
+company identity set on **Settings** — preview or copy the rendered subject/body to your own
+clipboard. Jobpin never sends anything itself; it only drafts text you paste into your own
+mail client.
+
+### Data protection (Phase 5)
+
+Candidate data is encrypted at rest by default (D-17): a random per-install AES-256 key is
+wrapped via your Windows account (`safeStorage`/DPAPI) and stored at
+`jobpin-data\.keys\master.key` — nothing to type, nothing to remember. If your OS keychain is
+ever unavailable, the app keeps working unencrypted and the Settings **Data protection** card
+shows a persistent warning rather than failing silently. Company/job files (JD, notes,
+`learned_skills.md`) stay plain text by design — only candidate trees and candidate-bearing DB
+content are encrypted.
+
+**Backup & restore** (Settings → Data protection): "Back up…" writes the whole data set as one
+portable file, either passphrase-encrypted (`.jpbak`, recommended) or a plain zip behind an
+explicit "I understand candidate data will be unprotected" acknowledgement. **There is no
+passphrase recovery — losing it makes that backup permanently unreadable; write it down
+somewhere safe.** "Restore…" picks a backup file, asks for its passphrase if encrypted,
+requires typing "restore" to confirm, then replaces the current data set and relaunches the
+app; the pre-restore data is kept alongside it as a dated `jobpin-data.pre-restore-<timestamp>`
+folder for you to delete manually once you've confirmed the restore worked.
+
+**Deletion** (Delete button on Job and Candidate pages, typed-name confirmation required):
+deleting a **candidate** anonymises them — name/email/phone are scrubbed and their files
+removed, but every past ranking snapshot keeps that candidate's rank and score with the name
+replaced, so historical rankings never silently reshuffle. Deleting a **job** is a full cascade:
+the job, every one of its candidates, and its entire ranking history are removed outright,
+along with its folder on disk. Both actions call `DELETE /candidates/:id` / `DELETE /jobs/:id`
+and cannot be undone from the UI.

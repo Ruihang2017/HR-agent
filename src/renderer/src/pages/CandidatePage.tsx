@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { apiJson, ApiError } from '../api'
 import StatusBadge, { type Tone } from '../components/StatusBadge'
+import ConfirmDeleteModal from '../components/ConfirmDeleteModal'
 
 interface CandidateDetail {
   id: number; jobId: number; name: string; email: string | null; phone: string | null
@@ -116,6 +117,7 @@ export default function CandidatePage() {
   const candidateId = Number(id)
   const [c, setC] = useState<CandidateDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const [analysis, setAnalysis] = useState<AnalysisResp | null>(null)
   const [tasks, setTasks] = useState<TaskRow[]>([])
   const [triggerBusy, setTriggerBusy] = useState(false)
@@ -358,11 +360,18 @@ export default function CandidatePage() {
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--sp-3)' }}>
         <h1 style={{ margin: 0 }}>{c.name}</h1>
         <StatusBadge status={c.status} />
-        <button onClick={() => window.jobpin.openPath(c.folderPath)}
-          style={{ marginLeft: 'auto', border: '1px solid var(--c-border)', background: 'var(--c-surface)',
-                   padding: 'var(--sp-1) var(--sp-3)', borderRadius: 'var(--radius-sm)' }}>
-          Open folder
-        </button>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--sp-2)' }}>
+          <button onClick={() => window.jobpin.openPath(c.folderPath)}
+            style={{ border: '1px solid var(--c-border)', background: 'var(--c-surface)',
+                     padding: 'var(--sp-1) var(--sp-3)', borderRadius: 'var(--radius-sm)' }}>
+            Open folder
+          </button>
+          <button onClick={() => setDeleteOpen(true)}
+            style={{ background: 'var(--c-danger)', color: 'var(--c-on-accent)', border: 'none',
+                     padding: 'var(--sp-1) var(--sp-3)', borderRadius: 'var(--radius-sm)' }}>
+            Delete candidate
+          </button>
+        </div>
       </div>
       <p style={{ color: 'var(--c-text-2)' }}>
         {c.originalFilename ? `from ${c.originalFilename} · ` : ''}added {c.createdAt.slice(0, 10)}
@@ -619,6 +628,20 @@ export default function CandidatePage() {
           <h2 style={{ margin: '0 0 var(--sp-3)', fontSize: 'var(--text-lg)' }}>Resume text</h2>
           <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', margin: 0 }}>{c.extractedText}</pre>
         </div>
+      )}
+
+      {deleteOpen && (
+        <ConfirmDeleteModal
+          title="Delete this candidate?"
+          expectedName={c.name}
+          nameLabel="candidate name"
+          description="Removes their files and personal details; past rankings keep the rank & score with the name removed. This cannot be undone."
+          onConfirm={async () => {
+            await apiJson(`/candidates/${candidateId}`, { method: 'DELETE' })
+            navigate(`/jobs/${c.jobId}`)
+          }}
+          onClose={() => setDeleteOpen(false)}
+        />
       )}
     </div>
   )

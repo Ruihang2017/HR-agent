@@ -5,6 +5,7 @@ import * as candidates from './candidates'
 import { extractText, extOf } from './extract'
 import { ConflictError, NotFoundError, ValidationError } from './errors'
 import { GatewayError } from './ai/gateway'
+import { deleteCandidate, deleteJob } from './deletion'
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024 // spec section 3: 20 MB → 413
 
@@ -77,5 +78,19 @@ export function registerJobRoutes(app: Hono, deps: JobsDeps): void {
     c.json(candidates.listCandidates(deps, Number(c.req.param('id'))))
   )
 
+  // Phase 5 data-protection (D-17): thin handlers over deletion.ts, which owns the actual
+  // anonymise/cascade semantics and the transaction + folder-removal discipline. `deps` is
+  // structurally a DeletionDeps (db, paths, dataKey?) - no re-shaping needed. Typed 404s
+  // (unknown job/candidate) bubble to the shared onError above.
+  app.delete('/jobs/:id', c => {
+    deleteJob(deps, Number(c.req.param('id')))
+    return c.json({ deleted: true })
+  })
+
   app.get('/candidates/:id', c => c.json(candidates.getCandidate(deps, Number(c.req.param('id')))))
+
+  app.delete('/candidates/:id', c => {
+    deleteCandidate(deps, Number(c.req.param('id')))
+    return c.json({ deleted: true })
+  })
 }
