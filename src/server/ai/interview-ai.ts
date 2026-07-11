@@ -387,8 +387,15 @@ export async function summariseInterview(
   const out = result.output
 
   const candFolder = candidateFolderFor(db, cand.id)
+  // interviewId + stage make the output file self-describing: downstream consumers
+  // (ranking) read which round the summary belongs to from the file itself instead of
+  // re-deriving it from the interviews table, which can desync when rounds are
+  // summarised out of order.
   const outputJson = JSON.stringify(
-    { ...out, provider: result.provider, model: result.model, promptVersion: INTERVIEW_SUMMARY_PROMPT_VERSION, createdAt: new Date().toISOString() },
+    {
+      ...out, interviewId, stage: interview.stage,
+      provider: result.provider, model: result.model, promptVersion: INTERVIEW_SUMMARY_PROMPT_VERSION, createdAt: new Date().toISOString()
+    },
     null, 2
   )
 

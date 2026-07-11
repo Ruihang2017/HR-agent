@@ -329,9 +329,16 @@ describe('summariseInterview', () => {
     expect(md).toContain('**advance**')
 
     const analysisRow = db
-      .prepare("SELECT kind FROM ai_analyses WHERE candidate_id = ? AND kind = 'interview_summary'")
-      .get(c.id) as { kind: string }
+      .prepare("SELECT kind, output_path FROM ai_analyses WHERE candidate_id = ? AND kind = 'interview_summary'")
+      .get(c.id) as { kind: string; output_path: string }
     expect(analysisRow.kind).toBe('interview_summary')
+
+    // The versioned output file carries its own interview identity + stage, so downstream
+    // consumers (ranking) never have to re-derive which round a summary belongs to.
+    const versioned = JSON.parse(fs.readFileSync(path.join(tmp, analysisRow.output_path), 'utf8')) as
+      { interviewId?: number; stage?: number }
+    expect(versioned.interviewId).toBe(interview.id)
+    expect(versioned.stage).toBe(interview.stage)
 
     const events = db
       .prepare("SELECT status, content FROM memory_events WHERE source_type = 'interview' AND source_id = ?")

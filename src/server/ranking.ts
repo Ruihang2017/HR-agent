@@ -70,6 +70,9 @@ export function runRanking(deps: { db: DB; paths: JobpinPaths }, jobId: number):
      WHERE candidate_id=? AND kind='interview_summary' AND output_path != ''
      ORDER BY id DESC LIMIT 1`
   )
+  // Fallback only, for pre-fix output files that don't carry their own stage: guess the
+  // round from the newest summarised interviews row. Can mislabel when rounds were
+  // summarised out of order — which is exactly why post-fix files embed interviewId/stage.
   const stageStmt = db.prepare(
     `SELECT stage FROM interviews WHERE candidate_id=? AND summary_path IS NOT NULL ORDER BY id DESC LIMIT 1`
   )
@@ -77,11 +80,16 @@ export function runRanking(deps: { db: DB; paths: JobpinPaths }, jobId: number):
   for (const a of analysed) {
     const row = interviewStmt.get(a.candidateId) as { id: number; output_path: string } | undefined
     if (!row) { interviewByCandidate.set(a.candidateId, undefined); continue }
-    const output = JSON.parse(readFileSync(join(paths.dataRoot, row.output_path), 'utf8')) as InterviewSummaryOutputT
+    const output = JSON.parse(readFileSync(join(paths.dataRoot, row.output_path), 'utf8')) as
+      InterviewSummaryOutputT & { interviewId?: number; stage?: number }
     if (!output.interview_performance) { interviewByCandidate.set(a.candidateId, undefined); continue }
-    const stageRow = stageStmt.get(a.candidateId) as { stage: number } | undefined
-    if (!stageRow) { interviewByCandidate.set(a.candidateId, undefined); continue }
-    interviewByCandidate.set(a.candidateId, { analysisId: row.id, score: output.interview_performance.score, stage: stageRow.stage })
+    let stage: number | undefined = typeof output.stage === 'number' ? output.stage : undefined
+    if (stage === undefined) {
+      const stageRow = stageStmt.get(a.candidateId) as { stage: number } | undefined
+      stage = stageRow?.stage
+    }
+    if (stage === undefined) { interviewByCandidate.set(a.candidateId, undefined); continue }
+    interviewByCandidate.set(a.candidateId, { analysisId: row.id, score: output.interview_performance.score, stage })
   }
   const anyHasInterview = [...interviewByCandidate.values()].some(v => v !== undefined)
 

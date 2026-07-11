@@ -88,10 +88,28 @@ function seedAnalysis(
  * `validSummaryFixture()` with `interview_performance.score` edited (or nulled out), plus
  * the `interviews` row that carries the round's `stage` marker — mirrors what
  * `summariseInterview` persists in production (per task-8 brief), bypassing the gateway.
+ *
+ * The output payload carries `interviewId` + `stage` like production post-fix files.
+ * `opts.payloadStage` overrides the stage written into the payload (to seed out-of-order
+ * summaries whose payload stage differs from the newest interviews row);
+ * `payloadStage: null` omits interviewId/stage entirely, emulating a pre-fix legacy file.
  */
-function seedInterviewSummary(candidateId: number, stage: number, score: number | null): number {
+function seedInterviewSummary(
+  candidateId: number,
+  stage: number,
+  score: number | null,
+  opts: { payloadStage?: number | null } = {}
+): number {
   const output = validSummaryFixture()
   output.interview_performance = score === null ? null : { ...output.interview_performance, score }
+
+  const interviewInfo = db.prepare(
+    `INSERT INTO interviews (candidate_id, stage, mode, summary_path, ai_score) VALUES (?, ?, 'manual', ?, ?)`
+  ).run(candidateId, stage, `${jobFolder}/candidates/candidate_${candidateId}/interviews/round-${stage}-summary.md`, score)
+  if (opts.payloadStage !== null) {
+    output.interviewId = Number(interviewInfo.lastInsertRowid)
+    output.stage = opts.payloadStage ?? stage
+  }
 
   const candFolderRel = `${jobFolder}/candidates/candidate_${candidateId}/analyses`
   fs.mkdirSync(path.join(tmp, candFolderRel), { recursive: true })
@@ -106,10 +124,6 @@ function seedInterviewSummary(candidateId: number, stage: number, score: number 
   const rel = `${candFolderRel}/analysis_${id}.json`
   fs.writeFileSync(path.join(tmp, rel), JSON.stringify(output))
   db.prepare('UPDATE ai_analyses SET output_path = ? WHERE id = ?').run(rel, id)
-
-  db.prepare(
-    `INSERT INTO interviews (candidate_id, stage, mode, summary_path, ai_score) VALUES (?, ?, 'manual', ?, ?)`
-  ).run(candidateId, stage, `${jobFolder}/candidates/candidate_${candidateId}/interviews/round-${stage}-summary.md`, score)
 
   return id
 }
@@ -391,5 +405,36 @@ describe('runRanking / listRankings / getRanking', () => {
 
     expect(itemA.reason).toMatch(/ Interview round 3: 88\.$/)
     expect(itemB.reason).not.toContain('Interview round')
+  })
+
+  it('17. out-of-order summaries: the stage label comes from the winning analysis payload, not the newest interviews row', async () => {
+    const a = await addCandidate('Alice')
+    seedAnalysis(a.id, { jd_fit: 70, key_skills: 70, relevant_experience: 70, growth_trajectory: 70, boss_preference_match: 70 })
+    // Rounds created in order (round 1 gets the older interviews id, round 2 the newer),
+    // then summarised OUT of order: round 2 first (older analysis), round 1 last (newer
+    // analysis, payload stage 1). The payload stage is authoritative for the label.
+    seedInterviewSummary(a.id, 1, 50, { payloadStage: 2 })
+    const newer = seedInterviewSummary(a.id, 2, 90, { payloadStage: 1 })
+
+    const result = runRanking({ db, paths }, jobId)
+    const criteria = getRanking(db, result.rankingId).criteria as Criteria
+
+    expect(criteria.per_candidate.find(p => p.candidate_id === a.id)!.interview_analysis_id).toBe(newer)
+    const item = result.items.find(i => i.candidateId === a.id)!
+    // (1.0*70 + 0.2*90) / 1.2 = 73.333... -> 73.3; labelled with the payload's round 1,
+    // NOT round 2 (the interviews row with the newest id).
+    expect(item.score).toBe(73.3)
+    expect(item.reason).toContain('Interview round 1: 90.')
+    expect(item.reason).not.toContain('Interview round 2')
+  })
+
+  it('18. pre-fix summary outputs without a stage field fall back to the interviews-row stage', async () => {
+    const a = await addCandidate('Alice')
+    seedAnalysis(a.id, { jd_fit: 70, key_skills: 70, relevant_experience: 70, growth_trajectory: 70, boss_preference_match: 70 })
+    seedInterviewSummary(a.id, 2, 85, { payloadStage: null }) // legacy file: no interviewId/stage
+
+    const result = runRanking({ db, paths }, jobId)
+    const item = result.items.find(i => i.candidateId === a.id)!
+    expect(item.reason).toContain('Interview round 2: 85.')
   })
 })
