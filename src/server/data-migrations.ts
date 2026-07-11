@@ -3,6 +3,16 @@ import path from 'node:path'
 import type { DB } from './db'
 import type { JobpinPaths } from './paths'
 import { encryptBuffer, isEncrypted } from './cryptx'
+import { renameSyncWithRetry } from './fsx'
+
+/**
+ * Sibling temp-file suffix for the encrypt-to-temp-then-rename dance below. Anything
+ * with this suffix inside a candidate tree is a leftover from a crashed sweep, never a
+ * real candidate file - the walker skips it, and the stale temp of a still-plaintext
+ * source file is consumed (overwritten, then renamed away) when that file is re-swept
+ * on the next run.
+ */
+const TMP_SUFFIX = '.jpenc-tmp'
 
 export interface SweepDeps {
   db: DB
@@ -25,6 +35,14 @@ export interface SweepResult {
  * and counted as skipped, so the sweep is idempotent by construction: a crash mid-run
  * (or running it again on an already-encrypted install) simply resumes/no-ops on the
  * files it hasn't touched yet.
+ *
+ * Crash safety: these are the boss's SOLE copies, so the rewrite is never in-place.
+ * Each file's ciphertext is written to a sibling `<file>.jpenc-tmp` first, then moved
+ * over the original via an atomic same-volume rename - at every instant the real path
+ * holds EITHER the intact plaintext OR the complete ciphertext, never a truncated
+ * hybrid (which the 4-byte JPE1 magic check would misclassify as done forever). A
+ * crash mid-write only ever loses the temp, and the next sweep re-encrypts from the
+ * untouched plaintext, consuming any stale temp in the process.
  *
  * Job- and company-level files (jd.md, inject.md, references/, question_bank.json,
  * learned_skills.md, email templates, and the `.keys/` master-key directory) all live
@@ -58,13 +76,25 @@ function sweepDir(dir: string, key: Buffer, result: SweepResult): void {
     if (entry.isDirectory()) {
       sweepDir(full, key, result)
     } else if (entry.isFile()) {
+      if (entry.name.endsWith(TMP_SUFFIX)) continue // leftover from a crashed run, not a candidate file
       const buf = fs.readFileSync(full)
       if (isEncrypted(buf)) {
         result.skipped++
-      } else {
-        fs.writeFileSync(full, encryptBuffer(key, buf))
-        result.encrypted++
+        continue
       }
+      const tmp = full + TMP_SUFFIX
+      try {
+        fs.writeFileSync(tmp, encryptBuffer(key, buf))
+        renameSyncWithRetry(tmp, full) // atomic on the same volume; retries Windows AV/indexer locks
+      } catch (e) {
+        try {
+          fs.rmSync(tmp, { force: true }) // best-effort: a failed sweep must not litter temps
+        } catch {
+          /* the rethrown error below is the one that matters */
+        }
+        throw e
+      }
+      result.encrypted++
     }
   }
 }

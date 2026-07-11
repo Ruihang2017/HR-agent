@@ -126,6 +126,35 @@ describe('sweepCandidateFiles', () => {
     expect(result).toEqual({ encrypted: 0, skipped: 0 })
   })
 
+  it('ignores leftover *.jpenc-tmp files from a crashed run: never encrypts them, and the real files still encrypt', async () => {
+    const job = createJob({ db, paths }, 'Barista', 'JD text')
+    const c = await addCandidateFromText({ db, paths }, job.id, 'Pat', 'Ten years of sales.')
+    const candDir = path.join(tmp, job.folderPath, 'candidates', `candidate_${c.id}`)
+    const realFiles = listFilesRecursive(candDir)
+
+    // Simulate a crash mid-write from a previous run: a truncated-ciphertext temp next to a
+    // still-intact plaintext original, plus an orphan temp with no surviving source file.
+    const consumedTmp = path.join(candDir, 'resume_text.md.jpenc-tmp')
+    const orphanTmp = path.join(candDir, 'ghost.jpenc-tmp')
+    fs.writeFileSync(consumedTmp, 'truncated-garbage-from-a-crash')
+    fs.writeFileSync(orphanTmp, 'orphan-garbage')
+
+    const result = sweepCandidateFiles({ db, paths, dataKey: key })
+
+    // Only the real files are counted and encrypted; temps are never treated as candidate files.
+    expect(result).toEqual({ encrypted: realFiles.length, skipped: 0 })
+    for (const f of realFiles) expect(isJpe1(f)).toBe(true)
+
+    // The stale temp for a re-swept file is consumed by the atomic rename; the orphan is
+    // left untouched (never encrypted - it is not a real candidate file).
+    expect(fs.existsSync(consumedTmp)).toBe(false)
+    expect(fs.readFileSync(orphanTmp, 'utf8')).toBe('orphan-garbage')
+
+    // The original plaintext survived the simulated crash and round-trips after the real sweep.
+    const detail = getCandidate({ db, paths, dataKey: key }, c.id)
+    expect(detail.extractedText).toBe('Ten years of sales.')
+  })
+
   it('never trips on .keys/ sitting alongside jobs/ at the data root', async () => {
     fs.mkdirSync(path.join(tmp, '.keys'), { recursive: true })
     fs.writeFileSync(path.join(tmp, '.keys', 'master.key'), 'not-a-candidate-file', 'utf8')
