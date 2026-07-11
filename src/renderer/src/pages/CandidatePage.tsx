@@ -44,6 +44,11 @@ interface InterviewListRow {
   id: number; stage: number; createdAt: string; hasSummary: boolean
   aiScore: number | null; bossDecision: string | null
 }
+interface TemplateInput { key: string; label: string; kind: string; required: boolean }
+interface TemplateInfo { type: string; label: string; subject: string; inputs: TemplateInput[] }
+interface RenderedEmail { subject: string; body: string }
+interface EmailSummary { id: number; type: string; filePath: string; createdAt: string }
+interface EmailDetail { id: number; type: string; createdAt: string; content: string }
 
 const RECOMMENDATION_LABEL: Record<AnalysisOutput['recommendation'], string> = {
   strong_yes: 'Strong yes', yes: 'Yes', maybe: 'Maybe', no: 'No'
@@ -64,6 +69,19 @@ const actionBtn: CSSProperties = {
 const primaryBtn: CSSProperties = {
   background: 'var(--c-accent)', color: 'var(--c-on-accent)', border: 'none',
   padding: 'var(--sp-2) var(--sp-4)', borderRadius: 'var(--radius-sm)'
+}
+const inputStyle: CSSProperties = {
+  border: '1px solid var(--c-border)', borderRadius: 'var(--radius-sm)', padding: 'var(--sp-2)',
+  width: '100%', background: 'var(--c-surface)', color: 'var(--c-text)'
+}
+
+/** `datetime-local`'s raw value ("2026-07-15T14:30") isn't fit for a template - render it the
+ *  same way the server renders `today` (emails.ts renderEmail) so the email reads naturally. */
+function formatReadableDatetime(raw: string): string {
+  if (!raw) return ''
+  const d = new Date(raw)
+  if (Number.isNaN(d.getTime())) return raw
+  return new Intl.DateTimeFormat('en-AU', { dateStyle: 'long', timeStyle: 'short' }).format(d)
 }
 
 function FactorCell({ label, factor }: { label: string; factor: FactorScore | null }) {
@@ -108,6 +126,23 @@ export default function CandidatePage() {
   const [interviewsError, setInterviewsError] = useState<string | null>(null)
   const [creatingInterview, setCreatingInterview] = useState(false)
 
+  const [emailTemplates, setEmailTemplates] = useState<TemplateInfo[] | null>(null)
+  const [emailTemplatesError, setEmailTemplatesError] = useState<string | null>(null)
+  const [emailType, setEmailType] = useState('')
+  const [emailInputs, setEmailInputs] = useState<Record<string, string>>({})
+  const [emailPreview, setEmailPreview] = useState<RenderedEmail | null>(null)
+  const [emailPreviewBusy, setEmailPreviewBusy] = useState(false)
+  const [emailSaveBusy, setEmailSaveBusy] = useState(false)
+  const [emailError, setEmailError] = useState<string | null>(null)
+  const [emailCopied, setEmailCopied] = useState(false)
+  const [savedEmails, setSavedEmails] = useState<EmailSummary[]>([])
+  const [savedEmailsError, setSavedEmailsError] = useState<string | null>(null)
+  const [openEmailId, setOpenEmailId] = useState<number | null>(null)
+  const [emailContents, setEmailContents] = useState<Record<number, string | undefined>>({})
+  const [emailContentError, setEmailContentError] = useState<Record<number, string | null>>({})
+  const [emailContentBusy, setEmailContentBusy] = useState<Record<number, boolean>>({})
+  const [copiedEmailId, setCopiedEmailId] = useState<number | null>(null)
+
   useEffect(() => {
     apiJson<CandidateDetail>(`/candidates/${candidateId}`).then(setC).catch(e => setError(e.message))
   }, [candidateId])
@@ -129,6 +164,117 @@ export default function CandidatePage() {
     } finally {
       setCreatingInterview(false)
     }
+  }
+
+  useEffect(() => {
+    apiJson<TemplateInfo[]>('/email-templates')
+      .then(ts => {
+        setEmailTemplates(ts)
+        setEmailType(prev => prev || (ts[0]?.type ?? ''))
+      })
+      .catch(e => setEmailTemplatesError(e instanceof Error ? e.message : String(e)))
+  }, [])
+
+  const fetchSavedEmails = useCallback(() => {
+    apiJson<EmailSummary[]>(`/candidates/${candidateId}/emails`)
+      .then(setSavedEmails)
+      .catch(e => setSavedEmailsError(e instanceof Error ? e.message : String(e)))
+  }, [candidateId])
+  useEffect(fetchSavedEmails, [fetchSavedEmails])
+
+  // Switching templates starts a clean form - a stray value from a differently-shaped
+  // template (or a stale preview/error for it) must not bleed into the next one.
+  useEffect(() => {
+    setEmailInputs({})
+    setEmailPreview(null)
+    setEmailError(null)
+  }, [emailType])
+
+  const currentTemplate = emailTemplates?.find(t => t.type === emailType) ?? null
+  const emailMissingRequired = currentTemplate
+    ? currentTemplate.inputs.some(i => i.required && !(emailInputs[i.key] ?? '').trim())
+    : false
+
+  function buildEmailPayloadInputs(template: TemplateInfo): Record<string, string> {
+    const out: Record<string, string> = {}
+    for (const input of template.inputs) {
+      const raw = emailInputs[input.key] ?? ''
+      out[input.key] = input.kind === 'datetime' ? formatReadableDatetime(raw) : raw
+    }
+    return out
+  }
+
+  async function previewEmail() {
+    if (!currentTemplate) return
+    setEmailError(null); setEmailPreviewBusy(true)
+    try {
+      const res = await apiJson<RenderedEmail>(`/candidates/${candidateId}/emails`, {
+        method: 'POST',
+        body: JSON.stringify({ type: currentTemplate.type, inputs: buildEmailPayloadInputs(currentTemplate), save: false })
+      })
+      setEmailPreview(res)
+    } catch (e) {
+      setEmailError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setEmailPreviewBusy(false)
+    }
+  }
+
+  async function saveEmailNow() {
+    if (!currentTemplate) return
+    setEmailError(null); setEmailSaveBusy(true)
+    try {
+      const res = await apiJson<{ id: number; filePath: string; subject: string; body: string }>(
+        `/candidates/${candidateId}/emails`,
+        { method: 'POST', body: JSON.stringify({ type: currentTemplate.type, inputs: buildEmailPayloadInputs(currentTemplate), save: true }) }
+      )
+      setEmailPreview({ subject: res.subject, body: res.body })
+      fetchSavedEmails()
+    } catch (e) {
+      setEmailError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setEmailSaveBusy(false)
+    }
+  }
+
+  async function copyEmailPreview() {
+    if (!emailPreview) return
+    await navigator.clipboard.writeText(`Subject: ${emailPreview.subject}\n\n${emailPreview.body}`)
+    setEmailCopied(true)
+    setTimeout(() => setEmailCopied(false), 1500)
+  }
+
+  async function toggleViewSavedEmail(id: number) {
+    if (openEmailId === id) { setOpenEmailId(null); return }
+    setOpenEmailId(id)
+    if (emailContents[id] !== undefined) return
+    setEmailContentBusy(prev => ({ ...prev, [id]: true }))
+    setEmailContentError(prev => ({ ...prev, [id]: null }))
+    try {
+      const res = await apiJson<EmailDetail>(`/emails/${id}`)
+      setEmailContents(prev => ({ ...prev, [id]: res.content }))
+    } catch (e) {
+      setEmailContentError(prev => ({ ...prev, [id]: e instanceof Error ? e.message : String(e) }))
+    } finally {
+      setEmailContentBusy(prev => ({ ...prev, [id]: false }))
+    }
+  }
+
+  async function copySavedEmail(id: number) {
+    let content = emailContents[id]
+    if (content === undefined) {
+      try {
+        const res = await apiJson<EmailDetail>(`/emails/${id}`)
+        content = res.content
+        setEmailContents(prev => ({ ...prev, [id]: content as string }))
+      } catch (e) {
+        setEmailContentError(prev => ({ ...prev, [id]: e instanceof Error ? e.message : String(e) }))
+        return
+      }
+    }
+    await navigator.clipboard.writeText(content)
+    setCopiedEmailId(id)
+    setTimeout(() => setCopiedEmailId(null), 1500)
   }
 
   const fetchAnalysis = useCallback(() => {
@@ -258,6 +404,110 @@ export default function CandidatePage() {
                   <span>Summary {iv.hasSummary ? '✓' : '—'}</span>
                 </span>
               </Link>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={card}>
+        <h2 style={{ margin: '0 0 var(--sp-3)', fontSize: 'var(--text-lg)' }}>Emails</h2>
+
+        {emailTemplatesError && <p style={{ color: 'var(--c-danger)', fontSize: 'var(--text-sm)' }}>{emailTemplatesError}</p>}
+
+        {emailTemplates && (
+          <>
+            <label style={{ display: 'block', fontSize: 'var(--text-sm)', color: 'var(--c-text-2)', marginBottom: 'var(--sp-1)' }}>
+              Template
+            </label>
+            <select value={emailType} onChange={e => setEmailType(e.target.value)} style={{ ...inputStyle, marginBottom: 'var(--sp-3)' }}>
+              {emailTemplates.map(t => <option key={t.type} value={t.type}>{t.label}</option>)}
+            </select>
+
+            {currentTemplate && currentTemplate.inputs.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', marginBottom: 'var(--sp-3)' }}>
+                {currentTemplate.inputs.map(input => (
+                  <div key={input.key}>
+                    <label style={{ display: 'block', fontSize: 'var(--text-sm)', color: 'var(--c-text-2)', marginBottom: 'var(--sp-1)' }}>
+                      {input.label}{input.required ? ' *' : ''}
+                    </label>
+                    {input.kind === 'datetime' ? (
+                      <input type="datetime-local"
+                        value={emailInputs[input.key] ?? ''}
+                        onChange={e => setEmailInputs(prev => ({ ...prev, [input.key]: e.target.value }))}
+                        style={inputStyle} />
+                    ) : input.kind === 'multiline' ? (
+                      <textarea rows={3}
+                        value={emailInputs[input.key] ?? ''}
+                        onChange={e => setEmailInputs(prev => ({ ...prev, [input.key]: e.target.value }))}
+                        style={inputStyle} />
+                    ) : (
+                      <input type="text"
+                        value={emailInputs[input.key] ?? ''}
+                        onChange={e => setEmailInputs(prev => ({ ...prev, [input.key]: e.target.value }))}
+                        style={inputStyle} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 'var(--sp-3)', marginBottom: 'var(--sp-3)' }}>
+              <button disabled={!currentTemplate || emailMissingRequired || emailPreviewBusy} onClick={previewEmail}
+                style={{ ...actionBtn, opacity: !currentTemplate || emailMissingRequired || emailPreviewBusy ? 0.5 : 1 }}>
+                {emailPreviewBusy ? 'Rendering…' : 'Preview'}
+              </button>
+              <button disabled={!currentTemplate || emailMissingRequired || emailSaveBusy} onClick={saveEmailNow}
+                style={{ ...primaryBtn, opacity: !currentTemplate || emailMissingRequired || emailSaveBusy ? 0.5 : 1 }}>
+                {emailSaveBusy ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+
+            {emailError && <p style={{ color: 'var(--c-danger)', fontSize: 'var(--text-sm)' }}>{emailError}</p>}
+
+            {emailPreview && (
+              <div style={{ border: '1px solid var(--c-border)', borderRadius: 'var(--radius-sm)', padding: 'var(--sp-3)', marginBottom: 'var(--sp-4)' }}>
+                <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', margin: '0 0 var(--sp-3)' }}>
+                  {`Subject: ${emailPreview.subject}\n\n${emailPreview.body}`}
+                </pre>
+                <button onClick={copyEmailPreview} style={actionBtn}>{emailCopied ? 'Copied' : 'Copy'}</button>
+              </div>
+            )}
+          </>
+        )}
+
+        <h3 style={{ margin: '0 0 var(--sp-2)', fontSize: 'var(--text-md)' }}>Saved emails</h3>
+        {savedEmailsError && <p style={{ color: 'var(--c-danger)', fontSize: 'var(--text-sm)' }}>{savedEmailsError}</p>}
+        {savedEmails.length === 0 ? (
+          <p style={{ color: 'var(--c-text-2)', margin: 0 }}>No emails saved yet.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {savedEmails.map(em => (
+              <div key={em.id} style={{ borderTop: '1px solid var(--c-border)', padding: 'var(--sp-3) 0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>{emailTemplates?.find(t => t.type === em.type)?.label ?? em.type} · {em.createdAt.slice(0, 10)}</span>
+                  <span style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+                    <button onClick={() => toggleViewSavedEmail(em.id)} style={actionBtn}>
+                      {openEmailId === em.id ? 'Hide' : 'View'}
+                    </button>
+                    <button onClick={() => copySavedEmail(em.id)} style={actionBtn}>
+                      {copiedEmailId === em.id ? 'Copied' : 'Copy'}
+                    </button>
+                  </span>
+                </div>
+                {openEmailId === em.id && (
+                  <div style={{ marginTop: 'var(--sp-2)' }}>
+                    {emailContentBusy[em.id] && <p style={{ color: 'var(--c-text-2)', fontSize: 'var(--text-sm)' }}>Loading…</p>}
+                    {emailContentError[em.id] && <p style={{ color: 'var(--c-danger)', fontSize: 'var(--text-sm)' }}>{emailContentError[em.id]}</p>}
+                    {emailContents[em.id] !== undefined && (
+                      <pre style={{
+                        whiteSpace: 'pre-wrap', fontFamily: 'inherit', margin: 0,
+                        background: 'var(--c-bg)', border: '1px solid var(--c-border)',
+                        borderRadius: 'var(--radius-sm)', padding: 'var(--sp-3)'
+                      }}>{emailContents[em.id]}</pre>
+                    )}
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         )}

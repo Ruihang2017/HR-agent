@@ -64,9 +64,11 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     try {
-      // Steps 2-3: paths + first-run scaffold (never overwrites).
+      // Steps 2-3: paths + first-run scaffold (never overwrites). Email templates ship
+      // alongside `out/` (see electron-builder.yml's `files:`), so the bundled source sits
+      // two levels above this compiled file in both dev (repo root) and packaged (asar root) layouts.
       const paths = getPaths()
-      ensureScaffold(paths)
+      ensureScaffold(paths, { emailTemplatesSrc: path.join(__dirname, '../../templates/au/emails') })
 
       // Step 4: open DB, apply migrations.
       const db = openDatabase(paths.dbFile)

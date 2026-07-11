@@ -8,6 +8,7 @@ interface CatalogProvider { provider: Provider; disclosure: string; models: Cata
 interface CatalogResp { plan: { label: string; tier: string; monthlyTokens: number }; providers: CatalogProvider[] }
 interface Selection { provider: Provider; model: string }
 interface Usage { plan: string; allowanceTokens: number; usedTokens: number }
+interface CompanySettings { name: string; senderName: string }
 
 const PROVIDER_LABELS: Record<Provider, string> = {
   openai: 'OpenAI',
@@ -23,6 +24,12 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  const [company, setCompany] = useState<CompanySettings | null>(null)
+  const [companyDraft, setCompanyDraft] = useState<CompanySettings>({ name: '', senderName: '' })
+  const [companyError, setCompanyError] = useState<string | null>(null)
+  const [companyBusyField, setCompanyBusyField] = useState<keyof CompanySettings | null>(null)
+  const [companySavedField, setCompanySavedField] = useState<keyof CompanySettings | null>(null)
+
   const refresh = useCallback(async () => {
     const [cat, sel, use] = await Promise.all([
       apiJson<CatalogResp>('/ai/catalog'),
@@ -34,6 +41,27 @@ export default function SettingsPage() {
   useEffect(() => {
     void refresh().catch(e => setError(e instanceof Error ? e.message : String(e)))
   }, [refresh])
+
+  useEffect(() => {
+    apiJson<CompanySettings>('/company-settings')
+      .then(cs => { setCompany(cs); setCompanyDraft(cs) })
+      .catch(e => setCompanyError(e instanceof Error ? e.message : String(e)))
+  }, [])
+
+  async function saveCompanyField(field: keyof CompanySettings) {
+    if (!company || companyDraft[field] === company[field]) return
+    setCompanyBusyField(field); setCompanyError(null); setCompanySavedField(null)
+    try {
+      const patch = field === 'name' ? { name: companyDraft.name } : { senderName: companyDraft.senderName }
+      const res = await apiJson<CompanySettings>('/company-settings', { method: 'PUT', body: JSON.stringify(patch) })
+      setCompany(res); setCompanyDraft(res); setCompanySavedField(field)
+      setTimeout(() => setCompanySavedField(f => (f === field ? null : f)), 1500)
+    } catch (e) {
+      setCompanyError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setCompanyBusyField(null)
+    }
+  }
 
   function selectModel(provider: Provider, model: string) {
     if (current && current.provider === provider && current.model === model) {
@@ -55,22 +83,69 @@ export default function SettingsPage() {
     finally { setBusy(false) }
   }
 
+  const card = {
+    background: 'var(--c-surface)', border: '1px solid var(--c-border)',
+    borderRadius: 'var(--radius)', padding: 'var(--sp-4)', marginBottom: 'var(--sp-5)'
+  }
+  const inputStyle = {
+    border: '1px solid var(--c-border)', borderRadius: 'var(--radius-sm)', padding: 'var(--sp-2)',
+    width: '100%', background: 'var(--c-surface)', color: 'var(--c-text)'
+  }
+
+  const companyIdentityCard = (
+    <div style={card}>
+      <h2 style={{ margin: '0 0 var(--sp-1)', fontSize: 'var(--text-lg)' }}>Company identity</h2>
+      <p style={{ margin: '0 0 var(--sp-3)', color: 'var(--c-text-2)', fontSize: 'var(--text-sm)' }}>
+        used in email templates
+      </p>
+
+      {companyError && <p style={{ color: 'var(--c-danger)', fontSize: 'var(--text-sm)' }}>{companyError}</p>}
+
+      <div style={{ marginBottom: 'var(--sp-3)' }}>
+        <label style={{ display: 'block', fontSize: 'var(--text-sm)', color: 'var(--c-text-2)', marginBottom: 'var(--sp-1)' }}>
+          Company name
+        </label>
+        <input value={companyDraft.name}
+          onChange={e => setCompanyDraft(d => ({ ...d, name: e.target.value }))}
+          onBlur={() => saveCompanyField('name')}
+          style={inputStyle} />
+        {companyBusyField === 'name' && <p style={{ color: 'var(--c-text-2)', fontSize: 'var(--text-xs)', margin: 'var(--sp-1) 0 0' }}>Saving…</p>}
+        {companySavedField === 'name' && <p style={{ color: 'var(--c-ok)', fontSize: 'var(--text-xs)', margin: 'var(--sp-1) 0 0' }}>Saved</p>}
+      </div>
+
+      <div>
+        <label style={{ display: 'block', fontSize: 'var(--text-sm)', color: 'var(--c-text-2)', marginBottom: 'var(--sp-1)' }}>
+          Sender name
+        </label>
+        <input value={companyDraft.senderName}
+          onChange={e => setCompanyDraft(d => ({ ...d, senderName: e.target.value }))}
+          onBlur={() => saveCompanyField('senderName')}
+          style={inputStyle} />
+        {companyBusyField === 'senderName' && <p style={{ color: 'var(--c-text-2)', fontSize: 'var(--text-xs)', margin: 'var(--sp-1) 0 0' }}>Saving…</p>}
+        {companySavedField === 'senderName' && <p style={{ color: 'var(--c-ok)', fontSize: 'var(--text-xs)', margin: 'var(--sp-1) 0 0' }}>Saved</p>}
+      </div>
+    </div>
+  )
+
   if (!catalog || !current || !usage) {
-    return <p style={{ color: error ? 'var(--c-danger)' : 'var(--c-text-2)' }}>{error ?? 'Loading…'}</p>
+    return (
+      <div style={{ maxWidth: 720 }}>
+        <h1 style={{ marginTop: 0 }}>Settings</h1>
+        {companyIdentityCard}
+        <p style={{ color: error ? 'var(--c-danger)' : 'var(--c-text-2)' }}>{error ?? 'Loading…'}</p>
+      </div>
+    )
   }
 
   const usagePct = usage.allowanceTokens > 0
     ? Math.min(100, (usage.usedTokens / usage.allowanceTokens) * 100)
     : 0
 
-  const card = {
-    background: 'var(--c-surface)', border: '1px solid var(--c-border)',
-    borderRadius: 'var(--radius)', padding: 'var(--sp-4)', marginBottom: 'var(--sp-5)'
-  }
-
   return (
     <div style={{ maxWidth: 720 }}>
       <h1 style={{ marginTop: 0 }}>Settings</h1>
+
+      {companyIdentityCard}
 
       {error && <p style={{ color: 'var(--c-danger)' }}>{error}</p>}
 
