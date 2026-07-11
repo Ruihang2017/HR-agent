@@ -67,7 +67,7 @@ Note: on Node 22.11 the `dist` script needs the bundled
 `NODE_OPTIONS=--experimental-require-module` (already in the script);
 upgrading to Node ≥ 22.12 makes it unnecessary.
 
-### AI features (Phase 2)
+### AI features (Phases 2-3)
 
 Analysis and ranking call a boss-chosen provider directly from this computer — no vendor
 service sits in between yet (that's a later phase; see `DECISIONS.md`). To enable it, add
@@ -81,10 +81,22 @@ Pick the active provider and model on the **Settings** page — it shows the pla
 jurisdiction/data-handling disclosure per provider (confirm before switching), and an
 advisory usage bar (used / allowance; the numbers are dev-stub placeholders, see D-13).
 
-Offline / no-key behaviour: everything except analysis keeps working with no key
+Each candidate can run one or more interview rounds. The AI drafts a question set across
+five categories (standard, resume-specific, JD-risk, boss-favourite, follow-up), filtering
+out anything that touches an unlawful or protected-attribute topic before it reaches the
+boss — with a visible count of how many were dropped. Every recorded answer can get a short
+per-item AI take, and closing out a round produces a written summary: an
+interview-performance ranking factor built from whichever items the boss flagged, plus
+memory proposals the boss approves or rejects one at a time. Approved lessons are appended
+to the job's `learned_skills.md`; any proposal that mentions a protected attribute is
+refused automatically, before the boss ever sees it. Good questions can also be starred
+straight into the job's `question_bank.json` for reuse in later rounds.
+
+Offline / no-key behaviour: everything except analysis and the three interview AI actions
+— question generation, per-answer takes, and round summaries — keeps working with no key
 configured or no network — jobs, candidates, extraction, ranking of already-analysed
-candidates, settings. Only the analyse/re-analyse action fails, visibly, with a plain
-auth/network message.
+candidates, settings. Only those four actions fail, visibly, with a plain auth/network
+message.
 
 **Cross-provider eval** (dev-only, run manually — never from tests or CI):
 
