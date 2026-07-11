@@ -100,4 +100,61 @@ describe('migration 0004', () => {
     expect(() => db.prepare('DELETE FROM rankings WHERE id = ?').run(again.rankingId)).toThrow(/immutable/)
     db.close()
   })
+
+  // Cross-flag confusion cases: each flag opens EXACTLY its own path and nothing else.
+
+  it("5. ONLY 'allow-snapshot-delete': UPDATE ranking_items reason still aborts (delete flag must not enable scrub)", () => {
+    const db = freshDb()
+    seedJobAndCandidate(db)
+    const { itemId } = seedSnapshot(db)
+    db.prepare("INSERT INTO maintenance_flags (flag) VALUES ('allow-snapshot-delete')").run()
+
+    expect(() => db.prepare("UPDATE ranking_items SET reason = 'scrubbed' WHERE id = ?").run(itemId))
+      .toThrow(/immutable/)
+    const row = db.prepare('SELECT reason FROM ranking_items WHERE id = ?').get(itemId) as { reason: string }
+    expect(row.reason).toBe('strong')
+    db.close()
+  })
+
+  it("6. ONLY 'allow-reason-scrub': DELETE on ranking_items and rankings both still abort (scrub flag must not enable deletes)", () => {
+    const db = freshDb()
+    seedJobAndCandidate(db)
+    const { rankingId, itemId } = seedSnapshot(db)
+    db.prepare("INSERT INTO maintenance_flags (flag) VALUES ('allow-reason-scrub')").run()
+
+    expect(() => db.prepare('DELETE FROM ranking_items WHERE id = ?').run(itemId)).toThrow(/immutable/)
+    expect(() => db.prepare('DELETE FROM rankings WHERE id = ?').run(rankingId)).toThrow(/immutable/)
+    expect(db.prepare('SELECT * FROM ranking_items WHERE id = ?').get(itemId)).toBeTruthy()
+    expect(db.prepare('SELECT * FROM rankings WHERE id = ?').get(rankingId)).toBeTruthy()
+    db.close()
+  })
+
+  it("7. WITH 'allow-reason-scrub': an UPDATE changing rank (or score) alongside reason still aborts (protected-column drift)", () => {
+    const db = freshDb()
+    seedJobAndCandidate(db)
+    const { itemId } = seedSnapshot(db)
+    db.prepare("INSERT INTO maintenance_flags (flag) VALUES ('allow-reason-scrub')").run()
+
+    expect(() => db.prepare("UPDATE ranking_items SET rank = 2, reason = 'x' WHERE id = ?").run(itemId))
+      .toThrow(/immutable/)
+    expect(() => db.prepare("UPDATE ranking_items SET score = 1.0, reason = 'x' WHERE id = ?").run(itemId))
+      .toThrow(/immutable/)
+    const row = db.prepare('SELECT rank, score, reason FROM ranking_items WHERE id = ?').get(itemId) as
+      { rank: number; score: number; reason: string }
+    expect(row).toEqual({ rank: 1, score: 86.0, reason: 'strong' })
+    db.close()
+  })
+
+  it("8. WITH 'allow-snapshot-delete': UPDATE rankings reason still aborts (rankings UPDATE is unconditional)", () => {
+    const db = freshDb()
+    seedJobAndCandidate(db)
+    const { rankingId } = seedSnapshot(db)
+    db.prepare("INSERT INTO maintenance_flags (flag) VALUES ('allow-snapshot-delete')").run()
+
+    expect(() => db.prepare("UPDATE rankings SET reason = 'edited' WHERE id = ?").run(rankingId))
+      .toThrow(/immutable/)
+    const row = db.prepare('SELECT reason FROM rankings WHERE id = ?').get(rankingId) as { reason: string }
+    expect(row.reason).toBe('initial')
+    db.close()
+  })
 })
