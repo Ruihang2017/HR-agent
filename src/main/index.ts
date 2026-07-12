@@ -5,9 +5,12 @@ import { getPaths } from '../server/paths'
 import { ensureScaffold } from '../server/scaffold'
 import { openDatabase, runMigrations } from '../server/db'
 import { migrations } from '../server/migrations'
+import { sweepCandidateFiles } from '../server/data-migrations'
 import { createApp } from '../server/app'
 import { startServer } from '../server/serve'
+import { applyPendingRestore } from '../server/backup'
 import { registerIpc } from './ipc'
+import { getOrCreateDataKey } from './key-provider'
 import { DevTokenIssuer } from '../server/ai/subscription'
 import { createAiRuntime } from '../server/ai/runtime'
 
@@ -64,17 +67,43 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     try {
-      // Steps 2-3: paths + first-run scaffold (never overwrites).
+      // Steps 2-3: paths + first-run scaffold (never overwrites). Email templates ship
+      // alongside `out/` (see electron-builder.yml's `files:`), so the bundled source sits
+      // two levels above this compiled file in both dev (repo root) and packaged (asar root) layouts.
       const paths = getPaths()
-      ensureScaffold(paths)
 
-      // Step 4: open DB, apply migrations.
-      const db = openDatabase(paths.dbFile)
+      // Apply a restore staged by a previous session (F8.4) BEFORE anything opens the DB, the
+      // server, or the key: at this point nothing holds a handle on jobpin-data, so the directory
+      // swap can't fail the way an in-process swap does. A no-op when no restore is pending.
+      const restored = applyPendingRestore(paths.dataRoot)
+      if (restored.applied) {
+        console.log(`restore applied; your previous data was kept at "${restored.preRestorePath}"`)
+      }
+
+      ensureScaffold(paths, { emailTemplatesSrc: path.join(__dirname, '../../templates/au/emails') })
+
+      // Step 4: data key (safeStorage-wrapped), then open DB keyed with it, apply migrations.
+      // `dataKey` is null when safeStorage has no OS keychain to wrap it with - Jobpin then
+      // runs keyless (unchanged pre-encryption behaviour) and reports this via /health.
+      const dataKey = getOrCreateDataKey(paths.dataRoot)
+      const db = openDatabase(paths.dbFile, dataKey ?? undefined)
       runMigrations(db, migrations)
 
+      // First-boot (and resumable) candidate-file encryption sweep: only runs once a
+      // data key exists, and only touches files still plaintext (idempotent by construction).
+      if (dataKey) {
+        const { encrypted, skipped } = sweepCandidateFiles({ db, paths, dataKey })
+        console.log(`candidate-file sweep: ${encrypted} file(s) encrypted, ${skipped} already encrypted`)
+      } else {
+        console.warn(
+          'safeStorage encryption is unavailable on this system - Jobpin is running WITHOUT ' +
+            'at-rest encryption for the database and candidate files.'
+        )
+      }
+
       // Step 5: start the localhost server on an OS-assigned port.
-      const ai = createAiRuntime({ db, paths, issuer: new DevTokenIssuer(loadDevEnv()) })
-      const honoApp = createApp({ db, paths, version: app.getVersion(), ai })
+      const ai = createAiRuntime({ db, paths, issuer: new DevTokenIssuer(loadDevEnv()), dataKey: dataKey ?? undefined })
+      const honoApp = createApp({ db, paths, version: app.getVersion(), ai, dataKey: dataKey ?? undefined })
       const { port } = await startServer(honoApp)
 
       // Boot recovery: any task left 'running' from a previous crash/kill is
@@ -83,7 +112,7 @@ if (!gotLock) {
       ai.queue.kick()
 
       // Step 6: bridge + window.
-      registerIpc({ port, dataRoot: paths.dataRoot, version: app.getVersion() })
+      registerIpc({ port, dataRoot: paths.dataRoot, version: app.getVersion(), paths, db, dataKey: dataKey ?? undefined })
       mainWindow = createWindow()
     } catch (err) {
       // Honesty-in-failure (spec section 3): plain-language dialog, clean exit.

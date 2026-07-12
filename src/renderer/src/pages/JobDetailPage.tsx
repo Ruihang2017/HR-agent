@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { apiJson, apiUpload } from '../api'
 import StatusBadge, { type Tone } from '../components/StatusBadge'
+import ConfirmDeleteModal from '../components/ConfirmDeleteModal'
 
 interface JobDetail { id: number; name: string; folderPath: string; jd: string | null; createdAt: string }
 interface CandidateSummary { id: number; name: string; status: string; createdAt: string }
@@ -89,10 +90,12 @@ function AnalysisCell({ state, onRetry }: { state: AnalysisState; onRetry: (task
 
 export default function JobDetailPage() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const jobId = Number(id)
   const [job, setJob] = useState<JobDetail | null>(null)
   const [cands, setCands] = useState<CandidateSummary[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [newName, setNewName] = useState('')
   const [editingJd, setEditingJd] = useState(false)
@@ -299,6 +302,13 @@ export default function JobDetailPage() {
               style={{ border: 'none', background: 'none', color: 'var(--c-accent)' }}>rename</button>
           </>
         )}
+        <button onClick={() => setDeleteOpen(true)}
+          style={{
+            marginLeft: 'auto', background: 'var(--c-danger)', color: 'var(--c-on-accent)', border: 'none',
+            padding: 'var(--sp-1) var(--sp-3)', borderRadius: 'var(--radius-sm)'
+          }}>
+          Delete job
+        </button>
       </div>
       {error && <p style={{ color: 'var(--c-danger)' }}>{error}</p>}
 
@@ -548,6 +558,20 @@ export default function JobDetailPage() {
           </div>
         )}
       </div>
+
+      {deleteOpen && (
+        <ConfirmDeleteModal
+          title="Delete this job?"
+          expectedName={job.name}
+          nameLabel="job name"
+          description="Removes the job, all its candidates, and all its ranking history. This cannot be undone."
+          onConfirm={async () => {
+            await apiJson(`/jobs/${jobId}`, { method: 'DELETE' })
+            navigate('/')
+          }}
+          onClose={() => setDeleteOpen(false)}
+        />
+      )}
     </div>
   )
 }

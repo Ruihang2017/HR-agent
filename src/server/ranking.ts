@@ -1,10 +1,9 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import type { DB } from './db'
 import type { JobpinPaths } from './paths'
 import { NotFoundError, ValidationError } from './errors'
 import { ANALYSIS_PROMPT_VERSION } from './ai/prompts'
 import type { AnalysisOutputT, InterviewSummaryOutputT } from './ai/schemas'
+import { readCandidateFileText } from './candidate-fs'
 
 export const RANKING_WEIGHTS = {
   jd_fit: 0.35,
@@ -30,15 +29,18 @@ interface LatestAnalysis {
 
 interface InterviewInfo { analysisId: number; score: number; stage: number }
 
-export function runRanking(deps: { db: DB; paths: JobpinPaths }, jobId: number): {
+export function runRanking(deps: { db: DB; paths: JobpinPaths; dataKey?: Buffer }, jobId: number): {
   rankingId: number
   items: { candidateId: number; rank: number; score: number; reason: string }[]
   excluded: { candidateId: number; reason: string }[]
 } {
-  const { db, paths } = deps
+  const { db } = deps
   if (!db.prepare('SELECT id FROM jobs WHERE id=?').get(jobId)) throw new NotFoundError(`job ${jobId} not found`)
 
-  const candidates = db.prepare('SELECT id, created_at FROM candidates WHERE job_id=? ORDER BY created_at, id').all(jobId) as
+  // Deleted candidates (D-17: status='deleted') are excluded from the scan - they must never
+  // reappear in a future ranking's `excluded` list. Their PAST ranking_items snapshot rows are
+  // untouched here; only the candidate scan that feeds a NEW ranking run is filtered.
+  const candidates = db.prepare("SELECT id, created_at FROM candidates WHERE job_id=? AND status != 'deleted' ORDER BY created_at, id").all(jobId) as
     { id: number; created_at: string }[]
 
   const latestStmt = db.prepare(
@@ -51,7 +53,7 @@ export function runRanking(deps: { db: DB; paths: JobpinPaths }, jobId: number):
   for (const c of candidates) {
     const row = latestStmt.get(c.id) as { id: number; provider: string; model: string; output_path: string } | undefined
     if (!row) { excluded.push({ candidateId: c.id, reason: 'no analysis' }); continue }
-    const output = JSON.parse(readFileSync(join(paths.dataRoot, row.output_path), 'utf8')) as AnalysisOutputT
+    const output = JSON.parse(readCandidateFileText(deps, row.output_path)) as AnalysisOutputT
     analysed.push({ candidateId: c.id, analysisId: row.id, provider: row.provider, model: row.model, output })
   }
   if (analysed.length === 0) throw new ValidationError('no analysed candidates to rank')
@@ -80,7 +82,7 @@ export function runRanking(deps: { db: DB; paths: JobpinPaths }, jobId: number):
   for (const a of analysed) {
     const row = interviewStmt.get(a.candidateId) as { id: number; output_path: string } | undefined
     if (!row) { interviewByCandidate.set(a.candidateId, undefined); continue }
-    const output = JSON.parse(readFileSync(join(paths.dataRoot, row.output_path), 'utf8')) as
+    const output = JSON.parse(readCandidateFileText(deps, row.output_path)) as
       InterviewSummaryOutputT & { interviewId?: number; stage?: number }
     if (!output.interview_performance) { interviewByCandidate.set(a.candidateId, undefined); continue }
     let stage: number | undefined = typeof output.stage === 'number' ? output.stage : undefined

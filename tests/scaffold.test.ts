@@ -37,4 +37,38 @@ describe('ensureScaffold', () => {
     expect(fs.readFileSync(p.valuesFile, 'utf8')).toBe('We value honesty.\n')
     expect(fs.readFileSync(p.bossPreferencesFile, 'utf8')).toBe('{"tone":"direct"}\n')
   })
+
+  it('skips email-template seeding entirely when emailTemplatesSrc is not given', () => {
+    const p = getPaths(tmp)
+    ensureScaffold(p)
+    expect(fs.existsSync(path.join(p.companyDir, 'email_templates'))).toBe(false)
+  })
+
+  it('seeds company/email_templates/ from emailTemplatesSrc when provided', () => {
+    const p = getPaths(tmp)
+    const src = path.join(__dirname, '..', 'templates', 'au', 'emails')
+    ensureScaffold(p, { emailTemplatesSrc: src })
+    const destDir = path.join(p.companyDir, 'email_templates')
+    const srcFiles = fs.readdirSync(src)
+    expect(srcFiles.length).toBe(7) // manifest.json + 6 .hbs
+    for (const name of srcFiles) {
+      expect(fs.existsSync(path.join(destDir, name))).toBe(true)
+      expect(fs.readFileSync(path.join(destDir, name), 'utf8')).toBe(
+        fs.readFileSync(path.join(src, name), 'utf8')
+      )
+    }
+  })
+
+  it('never overwrites a boss-edited email template on re-run', () => {
+    const p = getPaths(tmp)
+    const src = path.join(__dirname, '..', 'templates', 'au', 'emails')
+    ensureScaffold(p, { emailTemplatesSrc: src })
+    const destDir = path.join(p.companyDir, 'email_templates')
+    const editedFile = path.join(destDir, 'rejection.hbs')
+    fs.writeFileSync(editedFile, 'Boss edited content\n', 'utf8')
+    ensureScaffold(p, { emailTemplatesSrc: src }) // second run
+    expect(fs.readFileSync(editedFile, 'utf8')).toBe('Boss edited content\n')
+    // untouched files are still seeded/unaffected
+    expect(fs.existsSync(path.join(destDir, 'onboarding.hbs'))).toBe(true)
+  })
 })

@@ -6,8 +6,10 @@ import type { TokenIssuer } from './subscription'
 
 export interface AiRuntime { gateway: Gateway; queue: AnalysisQueue }
 
-export function createAiRuntime(opts: { db: DB; paths: JobpinPaths; issuer: TokenIssuer; fetchFn?: typeof fetch }): AiRuntime {
+export function createAiRuntime(opts: {
+  db: DB; paths: JobpinPaths; issuer: TokenIssuer; fetchFn?: typeof fetch; dataKey?: Buffer
+}): AiRuntime {
   const gateway = new Gateway({ db: opts.db, issuer: opts.issuer, fetchFn: opts.fetchFn })
-  const queue = createQueue({ db: opts.db, paths: opts.paths, gateway })
+  const queue = createQueue({ db: opts.db, paths: opts.paths, gateway, dataKey: opts.dataKey })
   return { gateway, queue }
 }

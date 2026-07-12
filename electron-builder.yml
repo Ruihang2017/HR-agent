@@ -5,8 +5,9 @@ directories:
   buildResources: resources
 files:
   - out/**
+  - templates/**
 asarUnpack:
-  - "**/node_modules/better-sqlite3/**"
+  - "**/node_modules/better-sqlite3-multiple-ciphers/**"
 win:
   target:
     - nsis

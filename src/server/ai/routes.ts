@@ -7,11 +7,10 @@ import { CATALOG, disclosureFor, type Provider } from './catalog'
 import { getPlan } from './subscription'
 import { getAiSettings, setAiSettings } from './settings'
 import { getRanking, listRankings, runRanking } from '../ranking'
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsCandidateFile, readCandidateFileText } from '../candidate-fs'
 
-export function registerAiRoutes(app: Hono, deps: { db: DB; paths: JobpinPaths; queue: AnalysisQueue }): void {
-  const { db, paths, queue } = deps
+export function registerAiRoutes(app: Hono, deps: { db: DB; paths: JobpinPaths; queue: AnalysisQueue; dataKey?: Buffer }): void {
+  const { db, paths, queue, dataKey } = deps
 
   app.post('/jobs/:id/analyses', async c => {
     const jobId = Number(c.req.param('id'))
@@ -48,15 +47,15 @@ export function registerAiRoutes(app: Hono, deps: { db: DB; paths: JobpinPaths; 
        FROM ai_analyses WHERE candidate_id=? AND kind='candidate_analysis' AND output_path != ''
        ORDER BY id DESC LIMIT 1`
     ).get(candidateId) as { id: number; provider: string; model: string; promptVersion: string; output_path: string; createdAt: string } | undefined
-    if (!row || !existsSync(join(paths.dataRoot, row.output_path))) {
+    if (!row || !existsCandidateFile({ paths, dataKey }, row.output_path)) {
       throw new NotFoundError(`no analysis for candidate ${candidateId}`)
     }
-    const output = JSON.parse(readFileSync(join(paths.dataRoot, row.output_path), 'utf8'))
+    const output = JSON.parse(readCandidateFileText({ paths, dataKey }, row.output_path))
     return c.json({ analysisId: row.id, provider: row.provider, model: row.model, promptVersion: row.promptVersion, createdAt: row.createdAt, output })
   })
 
   app.post('/jobs/:id/rankings', c => {
-    const result = runRanking({ db, paths }, Number(c.req.param('id')))
+    const result = runRanking({ db, paths, dataKey }, Number(c.req.param('id')))
     return c.json(result, 201)
   })
   app.get('/jobs/:id/rankings', c => c.json(listRankings(db, Number(c.req.param('id')))))

@@ -3,6 +3,7 @@ import { cors } from 'hono/cors'
 import { getSchemaVersion, type DB } from './db'
 import type { JobpinPaths } from './paths'
 import { registerJobRoutes } from './routes'
+import { registerEmailRoutes } from './email-routes'
 import type { AiRuntime } from './ai/runtime'
 import { registerAiRoutes } from './ai/routes'
 import { registerInterviewRoutes } from './ai/interview-routes'
@@ -12,6 +13,7 @@ export interface AppDeps {
   paths: JobpinPaths
   version: string
   ai?: AiRuntime
+  dataKey?: Buffer
 }
 
 /**
@@ -19,7 +21,7 @@ export interface AppDeps {
  * origin (file:// packaged, http://localhost:5173 in dev) and the server
  * itself only ever binds 127.0.0.1.
  */
-export function createApp({ db, paths, version, ai }: AppDeps): Hono {
+export function createApp({ db, paths, version, ai, dataKey }: AppDeps): Hono {
   const startedAt = Date.now()
   const app = new Hono()
   app.use('*', cors())
@@ -29,16 +31,20 @@ export function createApp({ db, paths, version, ai }: AppDeps): Hono {
       status: 'ok',
       schemaVersion: getSchemaVersion(db),
       dataDir: paths.dataRoot,
-      uptimeSeconds: Math.round((Date.now() - startedAt) / 1000)
+      uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
+      // 'on' once a data key is threaded through; 'unavailable' when safeStorage has no
+      // OS keychain to wrap it with (see main/key-provider.ts) - drives the Settings card.
+      encryption: dataKey ? 'on' : 'unavailable'
     })
   )
 
   app.get('/version', c => c.json({ app: 'jobpin', version }))
 
-  registerJobRoutes(app, { db, paths })
+  registerJobRoutes(app, { db, paths, dataKey })
+  registerEmailRoutes(app, { db, paths, dataKey }) // no AI dependency - unlike the interview routes below
   if (ai) {
-    registerAiRoutes(app, { db, paths, queue: ai.queue })
-    registerInterviewRoutes(app, { db, paths, gateway: ai.gateway })
+    registerAiRoutes(app, { db, paths, queue: ai.queue, dataKey })
+    registerInterviewRoutes(app, { db, paths, gateway: ai.gateway, dataKey })
   }
   return app
 }

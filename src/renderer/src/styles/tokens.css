@@ -11,6 +11,7 @@
   --c-accent-soft: #e8f0fe; --c-on-accent: #ffffff;
   --c-ok: #1a7f37; --c-warn-bg: #fff4e0; --c-warn-text: #92600a;
   --c-danger: #c0392b;
+  --c-scrim: rgba(0, 0, 0, 0.5);
   --c-sidebar-bg: #14141a; --c-sidebar-text: #d7d7de; --c-sidebar-muted: #8a8a95;
   --radius: 8px; --radius-sm: 6px;
 }

@@ -55,8 +55,97 @@ also have a dated entry below.
 | **D-34** | 2026-07-12 | **Per-candidate ranking factor sets** *(amends D-30 in part)*: `interview_performance` (base weight 0.2) joins a candidate's factors only when their latest interview summary carries a non-null score; weights renormalise **per candidate** over that candidate's present factors; `criteria.per_candidate` records each candidate's factor set and the snapshot view marks interviewed candidates. `boss_preference_match` keeps D-30's run-level all-or-none rule. | The two factors differ in kind: boss preferences are a job-configuration property (all-or-none preserves comparability); interview evidence is a candidate-journey property — run-level all-or-none would make the factor unusable, since only shortlists get interviewed. Un-interviewed candidates score exactly as before (regression-pinned). |
 | **D-35** | 2026-07-12 | **Interview safety mechanics:** F5.2 filtering is two-layer — prompt-level unlawful-topics instruction PLUS a code-side protected-attribute scanner (`sensitive-terms.ts`, word-boundary regexes incl. 八字/星座, conservative by design) dropping violations with a visible count; the F7.3 memory gate screens proposals with the same scanner **before the boss sees them** (refused status + visible reason); proposal lifecycle (pending/approved/rejected/refused) via migration 0003; the flagged-items-only factor rule is prompt-stated AND code-enforced (zero flagged items forces the factor null before persistence). | Product invariants (11.1-2/3, F7.3) must not rest on prompt compliance alone; a scanner false positive costs one visible dropped question, a false negative leaks discrimination into questions or memory. |
 | **D-36** | 2026-07-12 | **Interview summaries are self-describing; stored summaries are servable.** Persisted summary outputs embed `interviewId` + `stage` so ranking audit labels resolve from the same file as the score (a two-query desync was demonstrated and fixed); ranking uses **latest summary wins**. `GET /interviews/:id/summary` (final-review addendum to spec section 8) serves the stored narrative + pending proposals, so reopening a summarised round never suggests a paid re-call; Re-summarise carries an honest cost/supersede caption. | Audit data must be single-sourced; steering the boss into unnecessary token spend (with silent proposal supersession) violated the explicit-spend spirit of D-30. |
+| **D-37** | 2026-07-12 | **Communications (Phase 4): Handlebars-templated, copy-only emails.** Six AU business templates (`online_invitation`, `onsite_invitation`, `reschedule`, `rejection`, `more_materials`, `onboarding`) render from a boss-editable `company/email_templates/` tree (seeded once from `templates/au/emails/`) with candidate/job/company variables into `candidates/candidate_<id>/emails/<type>-<n>.md` + an `emails` row; company identity (`company.name`, `company.sender_name`) is editable on Settings. The UI only previews and copies to clipboard — **no send affordance anywhere** (D-15). | Matches D-19's Phase 4 scope (templates only, no legal documents) and D-15's no-send invariant; Handlebars was the owner's chosen engine over hand-rolled string substitution — boss-editable syntax without a second templating layer to maintain. |
+| **D-38** | 2026-07-12 | **Encryption architecture: Approach A (whole-DB cipher + file-layer candidate encryption), key = safeStorage-wrapped random master key.** `better-sqlite3-multiple-ciphers` replaces `better-sqlite3` (`PRAGMA hexkey`; a pre-existing plaintext DB is detected intrinsically and `hexrekey`'d once); candidate-tree files are AES-256-GCM'd through one seam (`candidate-fs.ts`, `JPE1` magic header); company/job files stay plain (D-17). The 32-byte key is generated once, wrapped via Electron `safeStorage` (DPAPI on Windows), and stored at `jobpin-data/.keys/master.key` — inside the data folder (D-21) but unreadable off-machine, which is why backups carry their own passphrase. `safeStorage.isEncryptionAvailable() === false` runs keyless with a persistent visible Settings warning, never silently. A documented (not built) upgrade seam lets `master.key`'s wrapping later move from DPAPI to a scrypt(passphrase) envelope without touching the DB or file layer. | Owner-chosen approach at the design session. Nothing to type or remember beats a boss-chosen passphrase for day-to-day use; DPAPI binding is exactly why portability is solved by encrypted backups (D-40), not by weakening the live key. Rejected: DB-only encryption (leaves candidate files as the exposed surface); a boss-chosen master passphrase (unwanted onboarding friction for the live key). |
+| **D-39** | 2026-07-12 | **Deletion: candidates are anonymised, jobs are cascaded — both behind flag-gated maintenance transactions.** `deleteCandidate` scrubs PII (`name`/`email`/`phone`, `status='deleted'`), purges every child row (interviews, documents, analyses, tasks), de-identifies `usage_events` (`candidate_id` → NULL, tokens kept), scrubs `memory_events` evidence quotes, and removes the candidate folder — but the `candidates` row and its `ranking_items` rows survive, so every past snapshot keeps its rank/score with only `reason` scrubbed. `deleteJob` cascades everything for that job (candidates, rankings, ranking_items, emails, the job row, the folder). Both run inside migration 0004's `maintenance_flags`-gated transaction (`allow-reason-scrub` / `allow-snapshot-delete`), so invariant 11.1-5 (ranking snapshots immutable) still aborts every other write path. | Owner decision: a deleted candidate must never make a historical ranking snapshot lie by silently reshuffling rank/score. Rejected: hard-deleting candidates (breaks snapshot referential integrity / invariant 11.1-5); relaxing the immutability triggers generally (reopens the door they exist to close — Phase 2/3 regression risk). |
+| **D-41** | 2026-07-12 | **Restore does not `app.relaunch()` — it stages, tells the boss to reopen Jobpin, and exits** *(supersedes the relaunch step of D-40)*. After staging the restore and closing the DB, the handler shows an info dialog ("Jobpin will now close. Open it again and your restored data will be in place.") and calls `app.exit(0)` with no relaunch; the pending marker drives `applyPendingRestore` on the next manual open. | Owner re-test on the managed AzureAD/OneDrive machine: the automatic relaunch spawned the new process while the old one was still releasing its OS handles on `jobpin-data`, so the new process's in-place content swap collided with those handles and boot failed with "Jobpin failed to start" — yet the *identical* apply code succeeded every time on a clean manual reopen. `app.relaunch()` was also observed not to take reliably in this run mode (the boss had to reopen anyway). Removing it guarantees exactly one process touches the data folder during a restore, eliminating the race; the manual reopen the boss already performs becomes the intended, documented flow. |
+| **D-40** | 2026-07-12 | **Backup & restore (F8.4): dual-format archive, no passphrase recovery, crash-safe same-volume swap.** `createBackup` snapshots the DB (`PRAGMA wal_checkpoint(TRUNCATE)` then a plain file copy — `db.backup()` rejects copying a keyed source to a plain target in this fork — then `hexrekey`'d to empty in the copy so the archive is portable), zips it with the full `jobpin-data` tree decrypted (excluding `.keys/` and live `jobpin.db*`), and writes either `jobpin-backup-<ts>.jpbak` (default: `JPBK1` + salt + IV + tag + AES-256-GCM under `scrypt(passphrase)`, passphrase entered twice, an explicit "cannot be recovered" warning at creation) or a plain `.zip` behind an "I understand candidate data will be unprotected" checkbox. `readBackup` gives one clean "wrong passphrase or corrupt backup" error for a wrong passphrase, a tampered file, or a non-backup file alike. Restore extracts into a same-volume sibling of `jobpin-data` (avoiding a cross-drive `EXDEV` on the final rename), **validates the extracted tree before closing the live DB** (a bad archive is rejected while the app stays usable — no forced restart on failure), then closes the DB and does a two-rename swap (`jobpin-data` → `.pre-restore-<ts>`, extracted tree → `jobpin-data`) with a compensating rollback if the second rename fails, then relaunches. The pre-restore copy is left for the boss to delete manually. **Restore is applied at the next launch, not in the running process, and replaces `jobpin-data`'s CONTENTS in place rather than renaming the directory** (`stageRestore` extracts+validates+marks pending, then relaunches; `applyPendingRestore`→`applyRestoreInPlace` runs at boot before the DB/server/key open). Two Windows realities forced this, both hit by the owner on a managed (AzureAD + OneDrive) machine: (1) an in-process swap left the embedded server serving `/health` against the just-closed DB ("database connection is not open") with a blank window + lingering processes; (2) **directory renames of the user-profile tree are blocked with `EPERM` by the OneDrive/AV filter driver** while file operations pass through (verified: renaming `jobpin.db` works, renaming `jobpin-data/` or `jobpin-data/jobs/` fails). So restore now uses only file-level primitives — a one-time full `.pre-restore` safety copy, a delete of `jobpin-data`'s contents (preserving `.keys/` so the machine key survives), and a copy of the staged tree in — never a directory rename. If `app.relaunch()` doesn't take, the pending marker persists so the restore applies the next time Jobpin opens; a mid-way failure keeps the marker (retry-safe: the safety copy is made once) and the full pre-restore copy. | Owner chose "both formats" over encrypted-only (a boss without a way to share/accept risk on a backup still needs one) and against plain-only (silently unprotected by default was rejected outright). The same-volume + validate-before-close-db + compensating-rollback design was hardened after review passes surfaced real failure modes (`os.tmpdir()` living on a different drive; an unvalidated archive forcing an unnecessary relaunch-then-fail cycle) — the boss must never be left without a working data folder. |
 
 ---
+
+### 2026-07-12 — Restore applies on manual reopen, no `app.relaunch()` (D-41, supersedes the relaunch step of D-40)
+**Decision:** The restore IPC handler stages the extracted tree, closes the DB, shows an info
+dialog telling the boss Jobpin will close and to open it again, and calls `app.exit(0)`. It does
+**not** call `app.relaunch()`. The `.jobpin-restore-pending` marker persists across the close, so
+`applyPendingRestore` swaps the folder contents in place on the next launch — the same
+`applyRestoreInPlace` path D-40 already uses, now reached only when a single process holds the
+data folder.
+**Context:** Owner re-test of the D-40 content-replace fix on the managed AzureAD + OneDrive
+machine. The staged restore applied correctly, but the *automatic* relaunch surfaced "Jobpin
+failed to start": `app.relaunch()` starts the new Jobpin process while the exiting one is still
+releasing its OS handles on `jobpin-data` (the DB and its `-wal`/`-shm`, open candidate files), so
+the new process's in-place delete/copy over the folder collides with those handles on Windows and
+the boot `catch` fires. The identical apply code succeeded every time on a clean manual reopen
+(old process fully gone → no contention), and `app.relaunch()` was already observed not to take
+reliably in this packaged/managed run mode (the boss had to reopen by hand regardless). One root
+cause — relying on relaunch puts two processes over the data folder at once — explained both the
+error and the manual-reopen. Removing the relaunch targets exactly the structural difference
+between the failing (auto-relaunch) and working (manual reopen) cases.
+**Alternatives:** keep `app.relaunch()` but delay it / wait for handle release (rejected — no clean
+handshake for "old process fully exited" exists on this platform; a timing delay is fragile and
+still races); best-effort relaunch after the dialog (rejected — reintroduces the two-process
+window the fix removes). A single-process manual reopen is race-free by construction and is the
+step the boss already performs.
+**Status:** Active. Supersedes the `app.relaunch()` step of D-40 (D-40's staging, in-place
+content-replace, `.pre-restore` safety copy, and marker-driven retry all stand). Recorded in the
+Phase 4+5 handover.
+
+### 2026-07-12 — Phase 4 communications: Handlebars templates, copy-only, never sent (D-37)
+**Decision:** Six AU email templates render via Handlebars from a boss-editable
+`company/email_templates/` tree (seeded once from `templates/au/emails/`, never overwritten) with
+candidate/job/company variables plus per-type declared inputs; rendering a missing required
+input or a broken template is a named `ValidationError`, not a silent blank or a 500. Saving
+writes through `candidate-fs.ts` (the same seam Part B later encrypts) to
+`candidates/candidate_<id>/emails/<type>-<n>.md` + an `emails` row; the UI can only preview and
+copy-to-clipboard.
+**Context:** Phase 4 design session; scope was already fixed by D-6/D-15/D-19 (templates only,
+never sent) — this session picked the templating engine and the manifest-driven input shape.
+**Alternatives:** hand-rolled `{{var}}` string substitution (rejected — Handlebars is a smaller
+addition than maintaining a bespoke templating micro-language); a `mailto:` or send-via-SMTP
+affordance (rejected outright by D-15).
+**Status:** Active. D-37 (index above); spec section 3; recorded in the Phase 4+5 handover.
+
+### 2026-07-12 — Phase 5 encryption architecture: Approach A, safeStorage-wrapped key (D-38)
+**Decision:** Whole-DB encryption via `better-sqlite3-multiple-ciphers` (drop-in swap, `PRAGMA
+hexkey`, one-time `hexrekey` upgrade of an existing plaintext DB) plus file-layer AES-256-GCM
+encryption of candidate-tree files only (`cryptx.ts` + the `candidate-fs.ts` seam) — company/job
+files stay plain per D-17. The key is a random 32 bytes, generated once and wrapped via Electron
+`safeStorage` (DPAPI on Windows) at `jobpin-data/.keys/master.key`; unavailable keychains fall
+back to running keyless with a persistent visible Settings warning. The passphrase-upgrade seam
+(DPAPI → scrypt(passphrase) wrapping, same `JPBK1` envelope as backups) is documented but not
+built this phase.
+**Context:** Owner chose Approach A at the design session over an in-memory-only or
+application-level-only alternative, explicitly trading day-to-day zero-friction (nothing to
+type) for machine-bound live data — which is exactly why backups (D-40) need their own
+passphrase to be portable.
+**Alternatives:** DB-only encryption (rejected — candidate files on disk would be the remaining
+exposed surface, defeating the point); a boss-chosen master passphrase for the live key
+(rejected — unwanted onboarding friction the owner explicitly didn't want).
+**Status:** Active. D-38 (index above); spec sections 4-6; existing suite doubles as the
+drop-in-cipher regression proof (all pre-Phase-5 tests stayed green keyless).
+
+### 2026-07-12 — Phase 5 deletion & backup/restore (D-39, D-40)
+**Decision:** (1) **D-39:** candidate deletion anonymises in place (PII scrubbed, folder
+removed, `ranking_items` rank/score preserved with only `reason` scrubbed); job deletion cascades
+outright (job, candidates, rankings, ranking_items, emails, folder). Both run inside migration
+0004's `maintenance_flags`-gated transaction, so the pre-existing snapshot-immutability triggers
+(invariant 11.1-5) still abort every other write path — proven by a regression test that deletes
+a candidate and then confirms a plain `UPDATE ranking_items` still throws. (2) **D-40:** backup
+offers an encrypted `.jpbak` (default, passphrase entered twice, explicit no-recovery warning) or
+a plain `.zip` behind an "I understand candidate data will be unprotected" acknowledgement;
+restore extracts to a same-volume sibling, validates the tree **before** closing the live DB, then
+swaps directories with a compensating rollback on a failed second rename.
+**Context:** Phase 5 design + two implementation-time hardening passes on restore: the first
+found `os.tmpdir()` can be a different drive than `jobpin-data` (an unretried `EXDEV` would leave
+the live folder renamed away with nothing to replace it); the second found an unvalidated bad
+archive was rejected only *after* the live DB connection had already closed, forcing an
+unnecessary relaunch-then-fail cycle for a boss who picked the wrong file.
+**Alternatives:** hard-deleting candidates (rejected — breaks snapshot referential integrity);
+encrypted-only or plain-only backups (both rejected by the owner — see D-40's rationale);
+extracting to the OS temp dir (rejected once the `EXDEV` failure mode was demonstrated);
+validating the archive only inside `restoreSwap` after the DB was already closed (rejected once
+the unnecessary-relaunch failure mode was demonstrated).
+**Status:** Active. D-39/D-40 (index above); recorded in the Phase 4+5 handover.
 
 ### 2026-07-12 — Phase 3 architecture & ranking: interactive-direct pipelines (D-33), per-candidate factor sets (D-34)
 **Decision:** (1) **D-33:** interview AI operations are direct awaited gateway calls — the queue

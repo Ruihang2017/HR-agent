@@ -1,12 +1,12 @@
-import fs from 'node:fs'
-import path from 'node:path'
 import type { DB } from './db'
 import type { JobpinPaths } from './paths'
 import { NotFoundError, ValidationError } from './errors'
+import { writeCandidateFile } from './candidate-fs'
 
 export interface InterviewDeps {
   db: DB
   paths: JobpinPaths
+  dataKey?: Buffer
 }
 
 /** The five F5.1 categories (design spec section 4). */
@@ -140,6 +140,19 @@ export function candidateFolderFor(db: DB, candidateId: number): string {
   return `${row.folderPath}/candidates/candidate_${candidateId}`
 }
 
+/**
+ * Shared guard (D-17) for write paths that would otherwise recreate a deleted candidate's
+ * folder: `createInterview` here and `saveEmail` (emails.ts) both write a new file under the
+ * candidate's folder as their very first side effect, so both call this before doing anything
+ * else. 404s the same way for "never existed" and "deleted" - a resurrected candidate must be
+ * indistinguishable, from the caller's perspective, from one that was never there.
+ */
+export function assertCandidateNotDeleted(db: DB, candidateId: number): void {
+  const row = db.prepare('SELECT status FROM candidates WHERE id = ?').get(candidateId) as { status: string } | undefined
+  if (!row) throw new NotFoundError(`candidate ${candidateId} not found`)
+  if (row.status === 'deleted') throw new NotFoundError(`candidate ${candidateId} not found`)
+}
+
 /** Every question in a round joined to its (possibly absent) answer, in order_index order. */
 function loadItems(db: DB, interviewId: number): InterviewItem[] {
   const rows = db
@@ -180,15 +193,14 @@ function loadItems(db: DB, interviewId: number): InterviewItem[] {
  * caller; the DB rows that produced this write remain valid and the next mutation rewrites the file.
  */
 export function writeRecordMirror(deps: InterviewDeps, interviewId: number): void {
-  const { db, paths } = deps
+  const { db } = deps
   const row = interviewRowOr404(db, interviewId)
   const items = loadItems(db, interviewId)
   const candFolderRel = candidateFolderFor(db, row.candidate_id)
   const interviewsDirRel = `${candFolderRel}/interviews`
-  fs.mkdirSync(path.join(paths.dataRoot, interviewsDirRel), { recursive: true })
   const recordRel = `${interviewsDirRel}/round-${row.stage}-record.json`
   const record = { stage: row.stage, createdAt: row.created_at, bossDecision: row.boss_decision, items }
-  fs.writeFileSync(path.join(paths.dataRoot, recordRel), JSON.stringify(record, null, 2) + '\n', 'utf8')
+  writeCandidateFile(deps, recordRel, JSON.stringify(record, null, 2) + '\n')
   if (row.transcript_path === null) {
     db.prepare('UPDATE interviews SET transcript_path = ? WHERE id = ?').run(recordRel, interviewId)
   }
@@ -198,6 +210,7 @@ export function writeRecordMirror(deps: InterviewDeps, interviewId: number): voi
 export function createInterview(deps: InterviewDeps, candidateId: number): InterviewRow {
   const { db } = deps
   candidateFolderFor(db, candidateId) // 404s if the candidate is unknown
+  assertCandidateNotDeleted(db, candidateId) // D-17: no new interview round for a deleted candidate
 
   const id = db.transaction((): number => {
     const { m } = db

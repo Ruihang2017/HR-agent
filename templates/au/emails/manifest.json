@@ -1,0 +1,58 @@
+[
+  {
+    "type": "online_invitation",
+    "label": "Online interview invitation",
+    "file": "online_invitation.hbs",
+    "subject": "Interview invitation — {{job_name}} at {{company_name}}",
+    "inputs": [
+      { "key": "interview_datetime", "label": "Interview date & time", "kind": "datetime", "required": true },
+      { "key": "meeting_link", "label": "Meeting link", "kind": "text", "required": true }
+    ]
+  },
+  {
+    "type": "onsite_invitation",
+    "label": "Onsite interview invitation",
+    "file": "onsite_invitation.hbs",
+    "subject": "Interview invitation — {{job_name}} at {{company_name}}",
+    "inputs": [
+      { "key": "interview_datetime", "label": "Interview date & time", "kind": "datetime", "required": true },
+      { "key": "location", "label": "Location", "kind": "text", "required": true }
+    ]
+  },
+  {
+    "type": "reschedule",
+    "label": "Interview reschedule",
+    "file": "reschedule.hbs",
+    "subject": "Rescheduling your interview — {{job_name}} at {{company_name}}",
+    "inputs": [
+      { "key": "interview_datetime", "label": "New interview date & time", "kind": "datetime", "required": true },
+      { "key": "reason", "label": "Reason (optional)", "kind": "text", "required": false }
+    ]
+  },
+  {
+    "type": "rejection",
+    "label": "Application rejection",
+    "file": "rejection.hbs",
+    "subject": "Your application — {{job_name}} at {{company_name}}",
+    "inputs": []
+  },
+  {
+    "type": "more_materials",
+    "label": "Request more materials",
+    "file": "more_materials.hbs",
+    "subject": "A quick request — {{job_name}} at {{company_name}}",
+    "inputs": [
+      { "key": "materials", "label": "Materials requested (optional)", "kind": "multiline", "required": false }
+    ]
+  },
+  {
+    "type": "onboarding",
+    "label": "Onboarding welcome",
+    "file": "onboarding.hbs",
+    "subject": "Welcome to {{company_name}}",
+    "inputs": [
+      { "key": "start_date", "label": "Start date", "kind": "datetime", "required": true },
+      { "key": "location", "label": "Location (optional)", "kind": "text", "required": false }
+    ]
+  }
+]

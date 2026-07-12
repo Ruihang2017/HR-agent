@@ -9,7 +9,7 @@ describe('migration 0003', () => {
   it('applies over 0001 and 0002 and records id 3', () => {
     const db = openDatabase(join(mkdtempSync(join(tmpdir(), 'jobpin-m3-')), 'test.db'))
     runMigrations(db, migrations)
-    expect(getSchemaVersion(db)).toBe(3)
+    expect(getSchemaVersion(db)).toBe(4)
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r: any) => r.name)
     expect(tables).toContain('memory_events')
 
@@ -32,7 +32,7 @@ describe('migration 0003', () => {
     const db = openDatabase(join(mkdtempSync(join(tmpdir(), 'jobpin-m3b-')), 'test.db'))
     runMigrations(db, migrations)
     runMigrations(db, migrations)
-    expect(getSchemaVersion(db)).toBe(3)
+    expect(getSchemaVersion(db)).toBe(4)
     db.close()
   })
 

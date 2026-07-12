@@ -1,33 +1,19 @@
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import type { Context, Hono } from 'hono'
+import type { Hono } from 'hono'
 import type { DB } from '../db'
 import type { JobpinPaths } from '../paths'
-import { NotFoundError, ValidationError } from '../errors'
+import { NotFoundError } from '../errors'
+import { parseJsonBody } from '../http'
 import type { Gateway } from './gateway'
 import * as interviews from '../interviews'
 import { generateQuestions, commentOnAnswer, summariseInterview } from './interview-ai'
 import { decideProposal, getJobMemory, starQuestion } from '../memory'
-
-/**
- * Strict JSON body parsing (same pattern as `POST /jobs/:id/analyses` in ai/routes.ts):
- * a blank body reads as `{}` so the handler's own missing-field validation applies; a
- * non-blank unparseable body is a typed 400, never a raw SyntaxError -> 500.
- */
-async function parseJsonBody<T extends object>(c: Context): Promise<Partial<T>> {
-  const raw = await c.req.text()
-  if (raw.trim().length === 0) return {}
-  try {
-    return JSON.parse(raw) as Partial<T>
-  } catch {
-    throw new ValidationError('request body must be valid JSON')
-  }
-}
+import { existsCandidateFile, readCandidateFileText } from '../candidate-fs'
 
 export interface InterviewRoutesDeps {
   db: DB
   paths: JobpinPaths
   gateway: Pick<Gateway, 'complete'>
+  dataKey?: Buffer
 }
 
 /**
@@ -116,11 +102,11 @@ export function registerInterviewRoutes(app: Hono, deps: InterviewRoutesDeps): v
       .all(interview.candidateId) as { id: number; createdAt: string; outputPath: string }[]
 
     const parsed = rows
-      .filter(r => existsSync(join(deps.paths.dataRoot, r.outputPath)))
+      .filter(r => existsCandidateFile(deps, r.outputPath))
       .map(r => ({
         id: r.id,
         createdAt: r.createdAt,
-        output: JSON.parse(readFileSync(join(deps.paths.dataRoot, r.outputPath), 'utf8')) as { interviewId?: number }
+        output: JSON.parse(readCandidateFileText(deps, r.outputPath)) as { interviewId?: number }
       }))
 
     const match =
