@@ -33,8 +33,8 @@ export function registerIpc(state: IpcState): void {
   })
 
   // Backup/restore (F8.4, Task 11). Electron-free logic lives in src/server/backup.ts; this
-  // layer only owns the dialogs, the safety-rename, and the relaunch. The passphrase travels
-  // in the IPC payload and is NEVER logged anywhere in this handler.
+  // layer only owns the dialogs and the clean shutdown. The passphrase travels in the IPC
+  // payload and is NEVER logged anywhere in this handler.
   ipcMain.handle(
     'jobpin:backup',
     async (_e, payload: { format: 'jpbak' | 'zip'; passphrase?: string }) => {
@@ -76,17 +76,32 @@ export function registerIpc(state: IpcState): void {
     const zipBytes = readBackup(filePaths[0], { passphrase: payload.passphrase })
 
     // STAGE the restore (extract + validate + write the pending marker) WITHOUT touching the
-    // live data folder or the DB. The actual swap happens at the next launch, in
-    // applyPendingRestore(), before anything opens the DB or the server — that's the only place
-    // it can run on Windows without fighting open file handles on jobpin-data (a bad archive is
-    // rejected here, so we never restart onto nothing). If staging throws, the live app is
+    // live data folder or the DB. The actual swap happens at the NEXT launch, in
+    // applyPendingRestore(), before anything opens the DB or the server — the only point on
+    // Windows where a single process holds jobpin-data with no open file handles (a bad archive
+    // is rejected here, so we never restart onto nothing). If staging throws, the live app is
     // untouched and the error surfaces to the renderer.
     await stageRestore(state.paths.dataRoot, zipBytes)
 
-    // Close cleanly, then relaunch to apply the staged restore. If relaunch doesn't take on this
-    // platform/run-mode, the marker persists and the restore applies the next time Jobpin opens.
+    // Close the DB, tell the boss to reopen Jobpin, then exit. We deliberately do NOT
+    // app.relaunch(): on this platform relaunch is unreliable AND it starts the new process
+    // while this one is still releasing its OS handles on jobpin-data, so the new process's
+    // in-place content swap collides with those handles and boot fails ("Jobpin failed to
+    // start" — observed by the owner on a managed AzureAD/OneDrive machine). A manual reopen
+    // guarantees exactly one process ever touches the data folder, so the staged restore
+    // applies cleanly on that next open.
     state.db.close()
-    app.relaunch()
+    await dialog.showMessageBox({
+      type: 'info',
+      title: 'Backup ready to restore',
+      message: 'Your backup is staged and ready.',
+      detail:
+        'Jobpin will now close. Open it again and your restored data will be in place.\n\n' +
+        'Your current data is kept in a dated "jobpin-data.pre-restore-…" folder next to your ' +
+        'data folder, so nothing is lost.',
+      buttons: ['Close Jobpin'],
+      defaultId: 0
+    })
     app.exit(0)
     return { canceled: false as const } // unreachable once app.exit() runs; keeps the handler's type honest
   })

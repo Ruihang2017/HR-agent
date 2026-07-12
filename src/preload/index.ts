@@ -26,8 +26,8 @@ const bridge = {
   openDataFolder: (): Promise<void> => ipcRenderer.invoke('jobpin:open-data-folder'),
   openPath: (relativePath: string): Promise<void> => ipcRenderer.invoke('jobpin:open-path', relativePath),
   // F8.4: backup writes to a boss-chosen file (save dialog, main-side); restore reads one
-  // (open dialog, main-side) then relaunches the app. The passphrase only ever travels over
-  // this one IPC call — never logged, never persisted by the renderer.
+  // (open dialog, main-side), stages it, then closes the app for the boss to reopen. The
+  // passphrase only ever travels over this one IPC call — never logged, never persisted by the renderer.
   backup: (request: BackupRequest): Promise<BackupOutcome> => ipcRenderer.invoke('jobpin:backup', request),
   restore: (request: RestoreRequest): Promise<RestoreOutcome> => ipcRenderer.invoke('jobpin:restore', request)
 }

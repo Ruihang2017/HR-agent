@@ -3,9 +3,31 @@
 - **Date:** 2026-07-12
 - **Author:** Claude (agent session), reviewed against the owner's task briefs
 - **Status:** Complete
-- **Related:** PRD section 10 Phases 4 and 5 (F6.1, F6.4, F8.2-F8.4); `DECISIONS.md` D-37..D-40
+- **Related:** PRD section 10 Phases 4 and 5 (F6.1, F6.4, F8.2-F8.4); `DECISIONS.md` D-37..D-41
   (also D-15, D-17, D-19, D-21 from earlier phases); `docs/superpowers/specs/2026-07-12-phase-4-5-communications-data-protection-design.md`;
   `docs/superpowers/plans/2026-07-12-phase-4-5-comms-data-protection.md`
+
+## Addendum — 2026-07-12: restore no longer auto-relaunches (D-41)
+
+Owner acceptance-tested restore on the real managed machine (AzureAD + OneDrive). Two follow-on
+fixes came out of it, both about the restore lifecycle rather than the archive format:
+
+1. **Content-replace, not directory rename (D-40, already in the body below).** The OneDrive/AV
+   filter driver on the managed profile tree blocks *directory* renames with `EPERM` while
+   permitting all file-level ops. `applyRestoreInPlace` now replaces `jobpin-data`'s contents in
+   place (full `.pre-restore` safety copy → delete contents except `.keys/` → copy staged tree in),
+   never renaming a directory.
+2. **No `app.relaunch()` (D-41).** Even with (1), the *automatic* relaunch surfaced "Jobpin failed
+   to start": the relaunched process began the in-place swap while the exiting process still held
+   OS handles on `jobpin-data`, and the deletes/copies collided. The identical apply code succeeds
+   on a clean manual reopen. Restore now stages, shows a "Jobpin will close — open it again to
+   finish" dialog, and exits; `applyPendingRestore` runs on the next manual launch with a single
+   process over the folder. `src/main/ipc.ts` (handler), `src/preload/index.ts`,
+   `src/renderer/src/pages/SettingsPage.tsx`, and `README.md` all describe the reopen flow now.
+
+**Owner-verified:** restore of both an encrypted `.jpbak` and a plain `.zip` completes with data
+intact after reopening Jobpin; the pre-restore safety copy appears next to the data folder. Full
+suite green; `out/` rebuilt.
 
 ## Summary
 

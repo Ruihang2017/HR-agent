@@ -109,8 +109,9 @@ export default function SettingsPage() {
     setRestoreBusy(true); setRestoreError(null)
     try {
       const outcome = await window.jobpin.restore({ passphrase: restorePassphrase || undefined })
-      // A successful restore relaunches the whole app (main calls app.exit()) — this renderer
-      // never sees that resolve. Only a cancel (file dialog dismissed) returns normally.
+      // A successful restore closes the whole app (main shows a "reopen to finish" dialog then
+      // calls app.exit()) — this renderer never sees that resolve. Only a cancel (file dialog
+      // dismissed) returns normally.
       if (outcome.canceled) setRestoreBusy(false)
     } catch (e) {
       setRestoreError(e instanceof Error ? e.message : String(e))
@@ -316,7 +317,7 @@ export default function SettingsPage() {
           <div>
             <strong>Restore from a backup</strong>
             <p style={{ margin: 'var(--sp-1) 0 0', color: 'var(--c-text-2)', fontSize: 'var(--text-sm)' }}>
-              Replaces everything currently in Jobpin and relaunches the app.
+              Replaces everything currently in Jobpin. Jobpin closes when you confirm — reopen it to finish.
             </p>
           </div>
           {!restoreOpen && <button onClick={openRestore} style={actionBtn}>Restore…</button>}
@@ -326,9 +327,9 @@ export default function SettingsPage() {
           <div style={{ marginTop: 'var(--sp-3)' }}>
             <div style={warnBox}>
               This replaces every job, candidate, and ranking currently in Jobpin with the contents
-              of the backup file you choose, then relaunches the app. Your current data is kept as
-              a dated safety copy next to your data folder, but this action itself cannot be undone
-              from here.
+              of the backup file you choose. Jobpin closes when you confirm — open it again and the
+              restored data will be in place. Your current data is kept as a dated safety copy next
+              to your data folder, but this action itself cannot be undone from here.
             </div>
             <label style={{ display: 'block', fontSize: 'var(--text-sm)', color: 'var(--c-text-2)', marginBottom: 'var(--sp-1)' }}>
               Passphrase (only for encrypted .jpbak backups)

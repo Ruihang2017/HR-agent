@@ -130,10 +130,13 @@ content are encrypted.
 portable file, either passphrase-encrypted (`.jpbak`, recommended) or a plain zip behind an
 explicit "I understand candidate data will be unprotected" acknowledgement. **There is no
 passphrase recovery — losing it makes that backup permanently unreadable; write it down
-somewhere safe.** "Restore…" picks a backup file, asks for its passphrase if encrypted,
-requires typing "restore" to confirm, then replaces the current data set and relaunches the
-app; the pre-restore data is kept alongside it as a dated `jobpin-data.pre-restore-<timestamp>`
-folder for you to delete manually once you've confirmed the restore worked.
+somewhere safe.** "Restore…" picks a backup file, asks for its passphrase if encrypted, and
+requires typing "restore" to confirm. Jobpin then stages the restore and **closes** — reopen it
+and the restored data is applied on that launch (Jobpin does not relaunch itself: on managed
+Windows machines a second process starting while the first is still closing would collide over
+the data folder). The pre-restore data is kept alongside it as a dated
+`jobpin-data.pre-restore-<timestamp>` folder for you to delete manually once you've confirmed the
+restore worked.
 
 **Deletion** (Delete button on Job and Candidate pages, typed-name confirmation required):
 deleting a **candidate** anonymises them — name/email/phone are scrubbed and their files
