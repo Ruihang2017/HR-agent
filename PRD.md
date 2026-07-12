@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Working name** | Jobpin (local hiring assistant) |
-| **Version** | 2.13 — Canonical |
+| **Version** | 2.14 — Canonical |
 | **Date** | 10 July 2026 |
 | **Owner** | Horace Hou |
 | **Provenance** | Derived in full from the client technical spec (2026-07-09 meeting), preserved verbatim at `docs/meeting_minutes/2026-07-09-jobpin-technical-spec.md` (D-8). **This PRD is the single source of truth**; new client input arrives as new minutes and is applied here by explicit update. |
-| **Status** | Phases 0–2 complete (2026-07-11); Phase 3 (interview loop & memory) is next |
+| **Status** | Phases 0–3 complete (2026-07-12); Phases 4+5 (communications + data protection, combined by owner decision) are next |
 
 **Version history**
 | Version | Date | Change |
@@ -27,6 +27,7 @@
 | 2.11 | 2026-07-10 | Phase 1 complete: status flipped; section 10 Phase 1 rewritten as delivered-with-pointers (spec / plan / handover; implementation decisions D-26, D-27). |
 | 2.12 | 2026-07-10 | Technical design layer added as companion docs (D-28): `docs/design/` — architecture · data & memory · workflows — the cross-phase HOW overview for technical reviewers; PRD remains the WHAT authority. |
 | 2.13 | 2026-07-11 | Phase 2 complete: status flipped; section 10 Phase 2 rewritten as delivered-with-pointers (spec / plan / handover / eval; decisions D-29…D-32). |
+| 2.14 | 2026-07-12 | Phase 3 complete: status flipped; section 10 Phase 3 rewritten as delivered-with-pointers (spec / plan / handover; decisions D-33…D-36, incl. the D-34 amendment to ranking composition). |
 
 ## How to use this document
 
@@ -316,14 +317,21 @@ including the owner's manual walk and eval run.
 at-cap behaviour, real allowances, DeepSeek metering) remain design items for the vendor
 subscription service, recorded with D-31.
 
-### Phase 3 — Interview loop & memory *(tasks 9–11)*
+### Phase 3 — Interview loop & memory *(tasks 9–11)* — ✅ complete (2026-07-12)
 
-- **Objective:** close the hiring loop: prepare questions, record what happened, learn from it — with the boss approving every memory write.
-- **Scope:** question generation (F5.1, F5.2) from JD + resume + `question_bank.json` + `learned_skills.md` + boss preferences; manual interview recording (F5.3); post-interview outputs + re-ranking (F5.4, F4.5); memory-update proposals with boss approval → `learned_skills.md` + `memory_events` (F7.2, F7.3). **Out:** STT/TTS (post-MVP).
-- **Technical approach:** interview entities per section 8.1 (`interviews`, `interview_questions`, `interview_answers`) + `interviews/` files; per-item source + confidence recorded (the section 5.5 epistemic principles); proposal/approval UI for skills; discriminatory-preference proposals blocked at the gateway (F7.3).
-- **Dependencies:** Phase 2.
-- **Acceptance criteria:** generate a question set showing all five F5.1 categories; record a round with per-item boss notes + AI analysis + confidence; post-interview summary produced and a new ranking snapshot appears; an AI skill proposal only lands in `learned_skills.md` after explicit approval (and a rejected one is recorded as rejected in `memory_events`); a proposal encoding a protected attribute is refused with a visible reason.
-- **Risks:** "affects-ranking" flag semantics (which interview items feed the interview-performance factor) need crisp design; memory quality — bad approved lessons compound, so proposals must show their evidence.
+Delivered: interview rounds with filtered five-category question generation (F5.1/F5.2 — prompt
++ code-side protected-attribute scanner, visible drops), per-item recording with on-demand AI
+comments and confidence (F5.3), post-interview summaries producing all F5.4 outputs plus an
+`interview_performance` ranking factor derived **only from boss-flagged items** (code-enforced),
+per-candidate re-ranking snapshots (F4.5, D-34), and the propose→approve→write memory gate
+(F7.2/F7.3 — approvals append evidence-cited lessons to `learned_skills.md`, rejections
+recorded, protected-attribute proposals refused by code before the boss sees them); question
+starring into `question_bank.json`. All acceptance criteria verified, including the owner's
+live walk.
+**How it was built lives elsewhere (point, don't restate):** design spec
+`docs/superpowers/specs/2026-07-11-phase-3-interview-loop-memory-design.md` · implementation
+plan `docs/superpowers/plans/2026-07-11-phase-3-interview-loop-memory.md` · handover
+`docs/handover/2026-07-12-phase-3-interview-loop-memory.md`. Decisions: D-33…D-36.
 
 ### Phase 4 — Communications *(task 12)*
 

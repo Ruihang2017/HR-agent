@@ -51,8 +51,45 @@ also have a dated entry below.
 | **D-30** | 2026-07-11 | **AI actions are explicit; ranking composition rules fixed.** Analysis ("Analyse" / "Analyse all new") and ranking ("Rank now") only run on a boss click — no automatic token spend. Ranking: weights `jd_fit .35 · key_skills .25 · relevant_experience .20 · growth_trajectory .10 · boss_preference_match .10`; factors without data are **excluded and the remaining weights renormalised to sum 1** (`interview_performance` excluded until Phase 3; `boss_preference_match` participates only when **every** included analysis has it); every exclusion recorded in the snapshot's `criteria`; unanalysed candidates reported, never silently dropped. | Owner decisions at design time — boss-controlled cost, honest scores over formula-shape stability (zero-filling absent factors would deflate scores misleadingly), and cross-candidate comparability beats per-candidate completeness. |
 | **D-31** | 2026-07-11 | **Subscription stubbed behind a `TokenIssuer` seam + advisory local metering.** The vendor service doesn't exist yet: `DevTokenIssuer` reads `.env` keys under a fake Pro plan; every gateway call records `usage_events`; the Settings page shows usage vs the D-13 allowances **advisory-only, dev-stub numbers, no enforcement**. Model-catalog ids are code constants (verified at live smoke; one-line edits when they churn). | Owner chose stub + local metering. The interface is the seam where real token issuance (D-12) lands without touching feature code; advisory numbers approximate the real UX without building throwaway enforcement. |
 | **D-32** | 2026-07-11 | **Adapter-owned output-mode instructions; a JD is required before analysis.** The shared analysis prompt carries no output-format instruction — each adapter appends its own (JSON-object wording for OpenAI/DeepSeek, "call the tool once with a complete input" for Anthropic). Analysing a job with an empty `jd.md` is refused with a clear message at both the enqueue and the pipeline. | Post-eval debugging root causes: the shared "respond with a single JSON object, no prose" line conflicted with Anthropic's forced tool-use and produced malformed tool input (live-verified both ways); an empty JD made honest models return empty evidence arrays that the schema (rightly) rejects — analysing JD-fit without a JD is a meaningless task, refused upfront. Also learned: claude-sonnet-5 rejects assistant-prefill, so prefill-based JSON extraction is not viable. |
+| **D-33** | 2026-07-12 | **Interview AI is interactive-direct (Approach A).** The three interview pipelines (question generation, per-item AI take, summary) are direct awaited gateway calls inside their route handlers; the Phase 2 queue stays analysis-only. Consequence: `GatewayError` maps to **502** `{error, code}` in the central error handler so interactive AI failures render as visible retryable states, never 500s. | Owner choice — these are single boss-watched actions, not batch work; a lost in-flight call costs one click to redo, and queue/polling would add latency and states for nothing. |
+| **D-34** | 2026-07-12 | **Per-candidate ranking factor sets** *(amends D-30 in part)*: `interview_performance` (base weight 0.2) joins a candidate's factors only when their latest interview summary carries a non-null score; weights renormalise **per candidate** over that candidate's present factors; `criteria.per_candidate` records each candidate's factor set and the snapshot view marks interviewed candidates. `boss_preference_match` keeps D-30's run-level all-or-none rule. | The two factors differ in kind: boss preferences are a job-configuration property (all-or-none preserves comparability); interview evidence is a candidate-journey property — run-level all-or-none would make the factor unusable, since only shortlists get interviewed. Un-interviewed candidates score exactly as before (regression-pinned). |
+| **D-35** | 2026-07-12 | **Interview safety mechanics:** F5.2 filtering is two-layer — prompt-level unlawful-topics instruction PLUS a code-side protected-attribute scanner (`sensitive-terms.ts`, word-boundary regexes incl. 八字/星座, conservative by design) dropping violations with a visible count; the F7.3 memory gate screens proposals with the same scanner **before the boss sees them** (refused status + visible reason); proposal lifecycle (pending/approved/rejected/refused) via migration 0003; the flagged-items-only factor rule is prompt-stated AND code-enforced (zero flagged items forces the factor null before persistence). | Product invariants (11.1-2/3, F7.3) must not rest on prompt compliance alone; a scanner false positive costs one visible dropped question, a false negative leaks discrimination into questions or memory. |
+| **D-36** | 2026-07-12 | **Interview summaries are self-describing; stored summaries are servable.** Persisted summary outputs embed `interviewId` + `stage` so ranking audit labels resolve from the same file as the score (a two-query desync was demonstrated and fixed); ranking uses **latest summary wins**. `GET /interviews/:id/summary` (final-review addendum to spec section 8) serves the stored narrative + pending proposals, so reopening a summarised round never suggests a paid re-call; Re-summarise carries an honest cost/supersede caption. | Audit data must be single-sourced; steering the boss into unnecessary token spend (with silent proposal supersession) violated the explicit-spend spirit of D-30. |
 
 ---
+
+### 2026-07-12 — Phase 3 architecture & ranking: interactive-direct pipelines (D-33), per-candidate factor sets (D-34)
+**Decision:** (1) **D-33:** interview AI operations are direct awaited gateway calls — the queue
+remains analysis-only; `GatewayError → 502 {error, code}` joins the central error mapping so
+interactive failures are visible and retryable. (2) **D-34, amending D-30 in part:**
+`interview_performance` (base weight 0.2) participates per candidate (latest summary, non-null
+score), with weights renormalised per candidate over present factors; `criteria.per_candidate`
+records the factor set per candidate; `boss_preference_match` keeps the run-level all-or-none
+rule.
+**Context:** Owner chose Approach A at the design session and approved the per-candidate
+asymmetry when presented with the rationale (only shortlists get interviewed — run-level
+all-or-none would permanently disable the factor).
+**Alternatives:** queue-everything (rejected — latency/states for interactive ops with no
+restart-resilience benefit); zero-filling or run-level all-or-none for the interview factor
+(rejected — either punishes the un-interviewed or disables the factor).
+**Status:** Active. D-33/D-34 (index above); un-interviewed scoring regression-pinned in tests.
+
+### 2026-07-12 — Phase 3 safety & provenance: two-layer filtering + code-screened memory gate (D-35), self-describing summaries + stored-summary endpoint (D-36)
+**Decision:** (1) **D-35:** question filtering and the memory gate share one code-side
+protected-attribute scanner; refusals happen before boss visibility with visible reasons;
+proposal statuses live in `memory_events.status` (migration 0003); the flagged-items-only
+ranking rule is code-enforced (null-guard), not merely prompted. (2) **D-36:** summary outputs
+embed their `interviewId`/`stage` (single-source audit labels; fixes a demonstrated two-query
+desync); ranking follows "latest summary wins"; `GET /interviews/:id/summary` serves stored
+narratives + pending proposals — added by the final whole-branch review as a deliberate spec
+section 8 addendum, with the Re-summarise button carrying an honest cost/supersede caption.
+**Context:** Phase 3 execution + final review. The scanner's initial rule set was hardened in a
+review fix loop (sex, national origin, birth-year, single, LGBTQ phrasings added).
+**Alternatives:** prompt-only enforcement (rejected — invariants don't rest on model
+compliance); purge-style supersession of pending proposals without disclosure (rejected —
+silent loss); copy-only fix for the re-summarise trap (rejected — still steers toward paid
+re-calls).
+**Status:** Active. D-35/D-36 (index above); recorded in the Phase 3 handover.
 
 ### 2026-07-11 — Phase 2 architecture: queue-first gateway with raw-HTTP adapters (D-29) and explicit AI actions + composition rules (D-30)
 **Decision:** Phase 2's two structural calls, both owner-made at the design session:
