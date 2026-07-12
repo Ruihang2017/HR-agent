@@ -7,7 +7,6 @@ import JSZip from 'jszip'
 import type { DB } from './db'
 import type { JobpinPaths } from './paths'
 import { BACKUP_MAGIC, decryptBuffer, deriveBackupKey, isEncrypted } from './cryptx'
-import { renameSyncWithRetry } from './fsx'
 
 /**
  * Backup/restore core (Task 11, F8.4) - Electron-free so it is fully unit-testable; the
@@ -200,44 +199,47 @@ export function assertValidRestoreTree(extractedDir: string): void {
 }
 
 /**
- * Crash-safe swap of a freshly-extracted backup tree into place, so a failed restore can never
- * leave the boss without a data folder (F8.4). Steps:
- *  1. Validate `extractedDir` first (must contain `jobpin.db`) - abort before touching anything.
- *  2. Rename the live `dataRoot` aside to a `.pre-restore-<ts>` sibling (never delete - the boss
- *     can always recover by hand).
- *  3. Move `extractedDir` into `dataRoot`. If THAT fails, compensate by renaming the pre-restore
- *     copy back to `dataRoot`, then rethrow the ORIGINAL error (mirrors renameJob's D-26
- *     compensate-on-failure pattern). A double failure logs both paths and rethrows.
+ * Applies a restore by replacing `dataRoot`'s CONTENTS in place — never renaming `dataRoot` or
+ * any of its subdirectories (F8.4).
  *
- * Callers MUST extract into a sibling of `dataRoot` (same volume) so every rename is an atomic
- * same-volume move - a cross-volume rename throws `EXDEV`, which `renameSyncWithRetry` does not
- * retry, and would trigger exactly the data-loss window this function exists to close.
- * Returns the pre-restore path so the caller can surface it to the boss.
+ * Why not a directory rename (the obvious atomic swap)? On managed Windows machines a filter
+ * driver — OneDrive/Known-Folder-Move, enterprise antivirus, the Search indexer — persistently
+ * watches the user-profile tree and **blocks directory renames with `EPERM`** while still
+ * permitting every file-level operation (verified on the affected machine: renaming `jobpin.db`
+ * works, renaming `jobpin-data/` or `jobpin-data/jobs/` fails). A rename-based swap therefore
+ * cannot work there. This uses only proven primitives: full-tree copy, recursive delete of a
+ * subtree, and file writes.
+ *
+ * Steps:
+ *  1. Validate `staging` (must contain `jobpin.db`).
+ *  2. One-time full safety copy of the current data → `.pre-restore-<ts>` (skipped if a prior
+ *     attempt already made it, so a retry can't overwrite the good copy with a half-restored one).
+ *  3. Delete every top-level entry inside `dataRoot` EXCEPT `.keys/` — the machine key stays in
+ *     place, so the restored (plaintext-in-archive) DB and candidate files are re-encrypted under
+ *     it by the boot sweep. `dataRoot` itself is never renamed or removed.
+ *  4. Copy the staged tree's contents into `dataRoot` (`staging` never carries `.keys/`).
+ *  5. Remove the staging tree.
+ * A failure part-way leaves the marker (caller retries next boot) and the full `.pre-restore`
+ * copy (manual recovery); step 2's skip-if-exists makes the retry safe. Returns the pre-restore path.
  */
-export function restoreSwap(
+export function applyRestoreInPlace(
   dataRoot: string,
-  extractedDir: string,
-  opts: { nowMs?: number; renameFn?: (from: string, to: string) => void } = {}
+  staging: string,
+  opts: { nowMs?: number } = {}
 ): string {
-  const rename = opts.renameFn ?? renameSyncWithRetry
-  assertValidRestoreTree(extractedDir)
+  assertValidRestoreTree(staging)
   const preRestorePath = `${dataRoot}.pre-restore-${opts.nowMs ?? Date.now()}`
-  rename(dataRoot, preRestorePath)
-  try {
-    rename(extractedDir, dataRoot)
-  } catch (e) {
-    // Second move failed: put the original data folder back so the boss is never left without one.
-    try {
-      rename(preRestorePath, dataRoot)
-    } catch (compErr) {
-      console.error(
-        `restore compensation failed: your original data is safe at "${preRestorePath}" but ` +
-          `"${dataRoot}" may be absent - rename the pre-restore folder back by hand to recover`,
-        compErr
-      )
-    }
-    throw e
+  if (!fs.existsSync(preRestorePath)) {
+    fs.cpSync(dataRoot, preRestorePath, { recursive: true }) // includes .keys so the copy is openable
   }
+  for (const entry of fs.readdirSync(dataRoot)) {
+    if (entry === '.keys') continue // preserve the live machine key
+    fs.rmSync(path.join(dataRoot, entry), { recursive: true, force: true })
+  }
+  for (const entry of fs.readdirSync(staging)) {
+    fs.cpSync(path.join(staging, entry), path.join(dataRoot, entry), { recursive: true })
+  }
+  fs.rmSync(staging, { recursive: true, force: true })
   return preRestorePath
 }
 
@@ -281,17 +283,17 @@ export async function stageRestore(
 }
 
 /**
- * At boot, before anything opens the DB or the server: if a restore was staged, swap it into
- * place. Nothing holds a handle on `dataRoot` at this point, so the rename can't fail on
- * Windows the way an in-process swap does. Uses the crash-safe `restoreSwap` (validate → rename
- * live aside → move staging in → compensate on failure). The marker is removed only after a
- * successful swap; a swap failure removes the marker and rethrows so boot surfaces it (rather
- * than looping the failure forever) — the original data is intact (compensated back) and the
- * staged tree is left for manual recovery. Returns whether a restore was applied.
+ * At boot, before anything opens the DB, the server, or the key: if a restore was staged, apply
+ * it by replacing `dataRoot`'s contents in place (`applyRestoreInPlace` — no directory rename,
+ * which a managed-Windows filter driver would `EPERM`). The marker is removed only on success;
+ * on failure it is KEPT so the next launch retries (`applyRestoreInPlace` is retry-safe — the
+ * `.pre-restore` copy is made once, and re-emptying/re-copying from the still-present staging
+ * tree converges), and the error is rethrown so boot surfaces it. A marker whose staging tree
+ * has vanished is treated as stale and cleared. Returns whether a restore was applied.
  */
 export function applyPendingRestore(
   dataRoot: string,
-  opts: { nowMs?: number; renameFn?: (from: string, to: string) => void } = {}
+  opts: { nowMs?: number } = {}
 ): { applied: boolean; preRestorePath?: string } {
   const marker = path.join(path.dirname(dataRoot), RESTORE_MARKER)
   if (!fs.existsSync(marker)) return { applied: false }
@@ -300,14 +302,9 @@ export function applyPendingRestore(
     fs.rmSync(marker, { force: true }) // stale/orphaned marker (staging gone) — ignore it
     return { applied: false }
   }
-  try {
-    const preRestorePath = restoreSwap(dataRoot, staging, opts)
-    fs.rmSync(marker, { force: true })
-    return { applied: true, preRestorePath }
-  } catch (e) {
-    fs.rmSync(marker, { force: true }) // do not boot-loop the failure; data is intact via compensation
-    throw e
-  }
+  const preRestorePath = applyRestoreInPlace(dataRoot, staging, opts) // throws → marker kept, retried next boot
+  fs.rmSync(marker, { force: true })
+  return { applied: true, preRestorePath }
 }
 
 /** Unzips `zipBytes` into `destDir` (created if missing), preserving the archive's tree. */
